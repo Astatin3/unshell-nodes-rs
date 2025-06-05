@@ -6,6 +6,7 @@
   - Probably out of scope
 - Build targets
   - To achieve a minimal size, there should probably be a way to pack diffrent features with the actual result binary.
+  - There should also be a way to update one of the hosts with the new functionality.
 
 ### Network
 - Diffrent traffic obfuscators:

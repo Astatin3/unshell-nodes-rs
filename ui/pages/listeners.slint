@@ -1,0 +1,64 @@
+import { Page } from "../page.slint";
+import { UITcpListener } from "../structs.slint";
+import { ScrollView, GridBox, Button } from "std-widgets.slint";
+import { BorderedRectangle, BoolText, TitleText } from "../components.slint";
+
+
+component ListenerCard inherits BorderedRectangle {
+    in property <UITcpListener> listener;
+
+    VerticalLayout {
+        padding: 10px;
+
+        Text {
+            text: listener.name;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        TitleText {
+            text: "Enabled: ";
+            BoolText {
+                state: listener.enabled;
+                font-weight: 500;
+                font-size: 14px;
+            }
+        }
+
+        TitleText {
+            text: "Remote Host: ";
+            Text {
+                text: listener.remote-host;
+                font-weight: 500;
+                font-size: 14px;
+            }
+        }
+
+        TitleText {
+            text: "Port: ";
+
+            Text {
+                text: listener.port;
+                font-weight: 500;
+                font-size: 14px;
+            }
+        }
+    }
+}
+
+export component ListenersPage inherits Page {
+    in-out property <[UITcpListener]> listeners;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+        VerticalLayout {
+
+            for listener[i] in listeners: ListenerCard {
+                listener: listener;
+            }
+
+            Rectangle { }
+        }
+    }
+}

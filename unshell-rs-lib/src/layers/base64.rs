@@ -1,7 +1,8 @@
 use crate::layers::Layer;
 use base64;
+use serde::{Deserialize, Serialize};
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct Base64;
 
 impl Layer for Base64 {

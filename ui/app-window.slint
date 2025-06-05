@@ -1,0 +1,161 @@
+import { Button, HorizontalBox, VerticalBox, Slider, StandardButton } from "std-widgets.slint";
+import { DashboardPage } from "pages/dashboard.slint";
+import { ListenersPage } from "pages/listeners.slint";
+import { ClientsPage } from "pages/clients.slint";
+import { ToolsPage } from "pages/tools.slint";
+import { UITcpListener } from "structs.slint";
+import { BorderedRectangle } from "components.slint";
+
+component SideButton inherits Button {
+    in property <length> sidebar_size: 40px;
+
+    preferred-width: sidebar_size;
+    height: sidebar_size;
+}
+
+export component AppWindow inherits Window {
+
+    in-out property <int> current-tab: 0;
+    in-out property <[UITcpListener]> listeners;
+
+    in-out property <string> app-info;
+
+    callback tab-clicked(int);
+
+    tab-clicked(index) => {
+        current-tab = index;
+    }
+
+    // background: @linear-gradient(20deg, #1a161d 0%, #27222a 100%);
+    MenuBar {
+
+        Menu {
+            title: @tr("File");
+            MenuItem {
+                title: @tr("New");
+                activated => {
+                    // file-new();
+                }
+            }
+
+            MenuItem {
+                title: @tr("Open");
+                activated => {
+                    // file-open();
+                }
+            }
+        }
+
+        Menu {
+            title: @tr("Edit");
+
+            MenuItem {
+                title: @tr("Copy");
+            }
+
+            MenuItem {
+                title: @tr("Paste");
+            }
+
+            MenuSeparator { }
+
+            Menu {
+                title: @tr("Find");
+                MenuItem {
+                    title: @tr("Find in document...");
+                }
+
+                MenuItem {
+                    title: @tr("Find Next");
+                }
+
+                MenuItem {
+                    title: @tr("Find Previous");
+                }
+            }
+        }
+    }
+
+    callback request-increase-value();
+    HorizontalLayout {
+
+        BorderedRectangle {
+            VerticalLayout {
+                spacing: 5px;
+                padding: 10px;
+
+                Text {
+                    text: "Unshell";
+                    font-size: 14px;
+                    font-weight: 1000;
+                    horizontal-alignment: center;
+                }
+
+                for entry[i] in [
+                    { name: "Dashboard" },
+                    { name: "Listeners" },
+                    { name: "Clients" },
+                    { name: "Tools" },
+                ]: SideButton {
+                    text: entry.name;
+
+                    clicked => {
+                        root.tab-clicked(i);
+                    }
+                }
+
+
+            // Strechy
+            Rectangle { }
+
+                SideButton {
+                    text: "Info";
+
+                    clicked => {
+                        info-window.visible = true;
+                    }
+                }
+            }
+        }
+
+        // Text {
+        //     text: "Counter: \{root.counter}";
+        // }
+
+        Rectangle {
+
+            if current-tab == 0: DashboardPage { }
+            if current-tab == 1: ListenersPage {
+                listeners: listeners;
+            }
+            if current-tab == 2: ClientsPage { }
+            if current-tab == 3: ToolsPage { }
+        }
+
+        callback file-new();
+        callback file-open();
+    }
+
+    info-window := Dialog {
+        visible: false;
+
+        BorderedRectangle {
+            VerticalLayout {
+                padding: 10px;
+                spacing: 10px;
+
+                Text {
+                    font-size: 20px;
+                    text: app-info;
+                }
+
+                StandardButton {
+                    kind: ok;
+                    clicked => {
+                        info-window.visible = false;
+                    }
+                }
+            }
+        }
+    }
+}

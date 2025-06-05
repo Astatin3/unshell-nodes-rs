@@ -1,15 +1,8 @@
-use log::{info, trace, warn};
-
-use std::{
-    io::{self, Write},
-    sync::{Arc, Mutex},
-    thread,
-};
+use std::sync::{Arc, Mutex};
 
 use crate::{
-    listeners::client::{self, Client},
+    listeners::client::Client,
     networkers::{Connection, ServerTrait},
-    packets::Packet,
 };
 
 pub struct Listener<S, C> {
@@ -41,7 +34,7 @@ impl<S, C> Listener<S, C> {
                     clients_lock.push(Client::new(conn));
                 }
                 Err(e) => {
-                    eprintln!("Failed to accept connection: {:?}", e);
+                    error!("Failed to accept connection: {:?}", e);
                 }
             }
         }

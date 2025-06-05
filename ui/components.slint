@@ -1,0 +1,27 @@
+
+export component BorderedRectangle inherits Rectangle {
+    background: #2a232a;
+    border-width: 1px;
+    border-color: darkslateblue;
+}
+
+export component BoolText inherits Text {
+    in property <bool> state;
+
+    text: state ? "TRUE" : "FALSE";
+    color: state ? #00ff00 : #ff0000;
+}
+
+export component TitleText inherits HorizontalLayout {
+    in property <string> text;
+
+    alignment: start;
+
+    Text {
+        text: text;
+        font-weight: 700;
+        font-size: 15px;
+    }
+
+    @children
+}
