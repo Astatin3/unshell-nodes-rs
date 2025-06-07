@@ -2,7 +2,6 @@
 extern crate log;
 
 pub mod config;
+pub mod connection;
 pub mod layers;
-pub mod listeners;
 pub mod networkers;
-pub mod packets;

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CampignConfig {
-    name: String,
+use crate::config::listeners::ListenerConfig;
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct CampaignConfig {
+    pub name: String,
+    pub listeners: Vec<ListenerConfig>,
 }

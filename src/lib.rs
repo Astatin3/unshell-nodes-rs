@@ -1,5 +1,10 @@
 #[macro_use]
 extern crate log;
 
-mod gui;
+mod client;
+mod packets;
 mod server;
+
+pub use client::UnshellClient;
+pub use client::UnshellGui;
+pub use server::UnshellServer;
