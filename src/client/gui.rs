@@ -3,9 +3,9 @@ use std::{
     error::Error,
     sync::{Arc, Mutex},
 };
-use unshell_rs_lib::config::campaign::CampaignConfig;
+use unshell_rs_lib::{config::campaign::CampaignConfig, connection::Parameter};
 
-use crate::{client::UnshellClient, packets::Parameter};
+use crate::client::UnshellClient;
 
 pub struct UnshellGui {
     client: UnshellClient,

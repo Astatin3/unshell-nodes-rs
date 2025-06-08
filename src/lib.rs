@@ -2,7 +2,6 @@
 extern crate log;
 
 mod client;
-mod packets;
 mod server;
 
 pub use client::UnshellClient;

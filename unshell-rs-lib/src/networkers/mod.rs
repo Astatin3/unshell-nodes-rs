@@ -10,6 +10,17 @@ pub trait Connection: Send + Sync {
     fn write(&mut self, data: &str) -> Result<(), Self::Error>;
 }
 
+pub trait AsyncConnection<C>
+where
+    C: Connection,
+{
+    type Error: std::fmt::Debug;
+
+    fn as_async<T: Serialize + DeserializeOwned + Send + 'static>(
+        connection: C,
+    ) -> (Sender<T>, Receiver<T>);
+}
+
 pub trait ServerTrait<C: Connection> {
     type Error: std::fmt::Debug;
 
@@ -95,6 +106,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::thread;
 
+use crossbeam_channel::Receiver;
+use crossbeam_channel::Sender;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 pub use tcp::TCPClient;
 pub use tcp::TCPConnection;
 pub use tcp::TCPServer;
+
+use crate::connection;

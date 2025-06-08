@@ -1,9 +1,14 @@
 use std::{
+    error::Error,
     io::{self, BufRead, BufReader, Write},
     net::{SocketAddr, TcpListener, TcpStream},
+    thread,
 };
 
-use crate::networkers::{ClientTrait, Connection, ServerTrait};
+use crossbeam_channel::{Receiver, Sender};
+use serde::{Serialize, de::DeserializeOwned};
+
+use crate::networkers::{AsyncConnection, ClientTrait, Connection, ServerTrait};
 
 pub struct TCPConnection {
     stream: TcpStream,
@@ -45,6 +50,67 @@ impl Connection for TCPConnection {
         writeln!(self.stream, "{}", data)?;
         self.stream.flush()?;
         Ok(())
+    }
+}
+
+impl AsyncConnection<TCPConnection> for TCPConnection {
+    type Error = io::Error;
+
+    fn as_async<T: Serialize + DeserializeOwned + Send + 'static>(
+        connection: TCPConnection,
+    ) -> (Sender<T>, Receiver<T>) {
+        let (send_tx, send_rx) = crossbeam_channel::unbounded::<T>();
+        let (recv_tx, recv_rx) = crossbeam_channel::unbounded::<T>();
+
+        let tx_clone = send_tx.clone();
+        thread::spawn(move || {
+            let mut reader = connection.reader;
+
+            let mut read = || -> Result<String, Self::Error> {
+                let mut line = String::new();
+                let n = reader.read_line(&mut line)?;
+
+                Ok(line.trim_end().to_string())
+            };
+
+            loop {
+                if let Ok(data) = read() {
+                    if data.is_empty() {
+                        break;
+                    }
+                    info!("Got {}", data);
+                    if let Ok(decoded) = serde_json::from_str::<T>(&data) {
+                        if let Err(e) = tx_clone.send(decoded) {
+                            error!("Got error: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+
+        let rx_clone = recv_rx.clone();
+        thread::spawn(move || {
+            let mut stream = connection.stream;
+
+            let mut write = |data: String| -> Result<(), Self::Error> {
+                writeln!(stream, "{}", data)?;
+                stream.flush()?;
+                Ok(())
+            };
+
+            loop {
+                if let Ok(data) = rx_clone.recv() {
+                    if let Ok(encoded) = serde_json::to_string(&data) {
+                        info!("Write {}", encoded);
+                        if let Err(e) = write(encoded) {
+                            error!("Got error: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+
+        (recv_tx, send_rx)
     }
 }
 

@@ -2,7 +2,6 @@ use std::{
     error::Error,
     net::SocketAddr,
     sync::{Arc, Mutex},
-    thread,
 };
 
 use serde::{Deserialize, Serialize};

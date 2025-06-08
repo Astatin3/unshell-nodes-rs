@@ -4,7 +4,7 @@ use unshell_rs_lib::config::campaign::CampaignConfig;
 
 use std::collections::HashMap;
 
-use crate::packets::Parameters;
+use unshell_rs_lib::connection::Parameters;
 
 lazy_static! {
     pub static ref DEFAULT_CAMPAIGN: CampaignConfig = CampaignConfig {

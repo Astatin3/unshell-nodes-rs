@@ -9,18 +9,18 @@ use std::{
     time::Duration,
 };
 
+use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 
 use unshell_rs_lib::{
     config::campaign::CampaignConfig,
-    connection::ErrorPacket,
-    networkers::{Connection, ServerTrait, TCPConnection, TCPServer, run_listener_state},
+    connection::{C2Packet, ErrorPacket, Parameters},
+    networkers::{
+        AsyncConnection, Connection, ServerTrait, TCPConnection, TCPServer, run_listener_state,
+    },
 };
 
-use crate::{
-    packets::{GuiPacket, Parameters},
-    server::{DEFAULT_CAMPAIGN, DEFAULT_USERS, User, config::DEFAULT_PARAMETERS},
-};
+use crate::server::{DEFAULT_CAMPAIGN, DEFAULT_USERS, User, config::DEFAULT_PARAMETERS};
 
 #[derive(Serialize, Deserialize)]
 pub struct UnshellServerConfig {
@@ -29,9 +29,15 @@ pub struct UnshellServerConfig {
     users: Vec<User>,
 
     #[serde(skip)]
-    client_count: usize,
-    #[serde(skip)]
-    broadcast_flag: HashMap<usize, Option<String>>,
+    clients: Vec<Client>,
+}
+
+impl UnshellServerConfig {
+    pub fn broadcast_update_param(&self, name: String) {
+        for i in 0..self.clients.len() {
+            let _ = self.clients.get(i).unwrap().broadcast_tx.send(name.clone());
+        }
+    }
 }
 
 pub struct UnshellServer {
@@ -40,7 +46,7 @@ pub struct UnshellServer {
 
 impl UnshellServer {
     pub fn from_filepath(filepath: &str) -> Self {
-        (|| -> Result<Self, Box<dyn Error>> {
+        let s = (|| -> Result<Self, Box<dyn Error>> {
             let mut file = File::open(filepath.to_string())?;
 
             let mut contents = String::new();
@@ -62,92 +68,98 @@ impl UnshellServer {
                     users: DEFAULT_USERS.clone(),
                     parameters: DEFAULT_PARAMETERS.clone(),
 
-                    client_count: 0,
-                    broadcast_flag: HashMap::new(),
+                    clients: Vec::new(),
                 })),
             }
-        })
+        });
+
+        // let (broadcast_tx, broadcast_rx) = crossbeam_channel::unbounded::<String>();
+        // let mut config_lock = s.config.lock().unwrap();
+        // config_lock.broadcast_tx = Some(broadcast_tx);
+        // config_lock.broadcast_rx = Some(broadcast_rx);
+        // std::mem::drop(config_lock);
+
+        s
     }
 
     pub fn run(&mut self, addr: SocketAddr) -> Result<(), Box<dyn Error>> {
-        let on_connect = |connection: TCPConnection,
-                          config_clone: Arc<Mutex<UnshellServerConfig>>| {
-            // Recieve loop
-            thread::spawn(move || {
-                let config = Arc::clone(&config_clone);
-
-                let mut connection = connection;
-
-                let send = |c: &mut TCPConnection, packet: GuiPacket| {
-                    if let Ok(packet) = packet.encode() {
-                        info!("Send {}", packet);
-                        c.write(packet.as_str()).unwrap();
-                    }
-                };
-
-                let mut config_lock = config.lock().unwrap();
-                let client_id = config_lock.client_count.clone();
-                config_lock.client_count += 1;
-                send(
-                    &mut connection,
-                    GuiPacket::SetAllParameters(config_lock.parameters.clone()),
-                );
-                std::mem::drop(config_lock);
-
-                loop {
-                    if !connection.is_alive() {
-                        warn!("Client {} disconnected!", connection.get_info());
-                        break;
-                    }
-                    if let Ok(data) = connection.read() {
-                        if let Ok(packet) = GuiPacket::decode(data.as_str()) {
-                            match packet {
-                                GuiPacket::GetParameter(param) => send(
-                                    &mut connection,
-                                    GuiPacket::AckGetParameter(param.clone(), {
-                                        let config_lock = config.lock().unwrap();
-                                        let result = config_lock.parameters.get(&param);
-                                        result.cloned()
-                                    }),
-                                ),
-                                GuiPacket::SetParameter(name, param) => send(
-                                    &mut connection,
-                                    GuiPacket::AckSetParameter({
-                                        let mut config_lock = config.lock().unwrap();
-                                        config_lock.parameters.insert(name.clone(), param);
-                                        config_lock.broadcast_flag.insert(client_id, Some(name));
-
-                                        true
-                                    }),
-                                ),
-                                _ => send(
-                                    &mut connection,
-                                    GuiPacket::Error(ErrorPacket::UnsupportedRequestError),
-                                ),
-                            }
-                        }
-                    }
-
-                    let mut config_lock = config.lock().unwrap();
-                    if let Some(Some(key)) = config_lock.broadcast_flag.get(&client_id) {
-                        send(
-                            &mut connection,
-                            GuiPacket::ParameterUpate(
-                                key.clone(),
-                                config_lock.parameters.get(key).unwrap().clone(),
-                            ),
-                        );
-                        config_lock.broadcast_flag.insert(client_id, None);
-                    }
-
-                    thread::sleep(Duration::from_millis(10));
-                }
-            });
-        };
-
         let config_clone = Arc::clone(&self.config);
-        run_listener_state(TCPServer::bind(&addr)?, on_connect, config_clone);
+        run_listener_state(TCPServer::bind(&addr)?, Client::run, config_clone);
 
         Ok(())
+    }
+}
+
+/// Remote client type for unshell parameters
+struct Client {
+    pub broadcast_tx: Sender<String>,
+}
+
+impl Client {
+    pub fn run(connection: TCPConnection, config: Arc<Mutex<UnshellServerConfig>>) {
+        let (tx, rx) = TCPConnection::as_async::<C2Packet>(connection);
+
+        let (broadcast_tx, broadcast_rx) = crossbeam_channel::unbounded::<String>();
+
+        let s = Self { broadcast_tx };
+
+        let mut config_lock = config.lock().unwrap();
+        config_lock.clients.push(s);
+        let config_clone = Arc::clone(&config);
+        let tx_clone = tx.clone();
+        thread::spawn(move || {
+            loop {
+                if let Ok(key) = broadcast_rx.recv() {
+                    let config_lock = config_clone.lock().unwrap();
+                    if let Err(e) = tx_clone.send(C2Packet::ParameterUpate(
+                        key.clone(),
+                        config_lock.parameters.get(&key).unwrap().clone(),
+                    )) {
+                        error!("Failed to send packet: {}", e);
+                    };
+                }
+            }
+        });
+
+        if let Err(e) = tx.send(C2Packet::SetAllParameters(config_lock.parameters.clone())) {
+            error!("Failed to send packet: {}", e);
+        };
+        std::mem::drop(config_lock);
+
+        thread::spawn(move || {
+            loop {
+                // if !connection.is_alive() {
+                //     warn!("Client {} disconnected!", connection.get_info());
+                //     break;
+                // }
+                if let Ok(packet) = rx.recv() {
+                    if let Err(e) = match packet {
+                        C2Packet::GetParameter(param) => {
+                            tx.send(C2Packet::AckGetParameter(param.clone(), {
+                                let config_lock = config.lock().unwrap();
+                                let result = config_lock.parameters.get(&param);
+                                result.cloned()
+                            }))
+                        }
+                        C2Packet::SetParameter(name, param) => {
+                            tx.send(C2Packet::AckSetParameter({
+                                let mut config_lock = config.lock().unwrap();
+                                config_lock.parameters.insert(name.clone(), param);
+                                config_lock.broadcast_update_param(name);
+                                true
+                            }))
+                        }
+
+                        C2Packet::Error(error) => {
+                            warn!("Got error: {:?}", error);
+                            Ok(())
+                        }
+                        _ => tx.send(C2Packet::Error(ErrorPacket::UnsupportedRequestError)),
+                    } {
+                        error!("Failed to send packet: {}", e);
+                    }
+                }
+            }
+        });
     }
 }

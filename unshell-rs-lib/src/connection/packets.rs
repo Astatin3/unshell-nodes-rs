@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
@@ -16,6 +19,15 @@ pub enum C2Packet {
     SetCampaign(CampaignConfig),
     AckSetCampaign,
 
+    GetParameter(String),
+    AckGetParameter(String, Option<Parameter>),
+    ParameterUpate(String, Parameter),
+
+    SetParameter(String, Parameter),
+    AckSetParameter(bool),
+
+    SetAllParameters(Parameters),
+
     Error(ErrorPacket),
 
     Sysinfo { hostname: String },
@@ -30,6 +42,14 @@ impl fmt::Debug for CampaignConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "CampaignConfig")
     }
+}
+
+pub type Parameters = HashMap<String, Parameter>;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum Parameter {
+    Test1,
+    CurrentTab(i32),
 }
 
 impl C2Packet {
