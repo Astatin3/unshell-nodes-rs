@@ -1,13 +1,12 @@
 use std::{
     io::{self, BufRead, BufReader, Write},
     net::{SocketAddr, TcpListener, TcpStream},
-    thread,
 };
 
-use crossbeam_channel::{Receiver, Sender};
-use serde::{Serialize, de::DeserializeOwned};
-
-use crate::networkers::{AsyncConnection, ClientTrait, Connection, ServerTrait};
+use crate::{
+    Error,
+    networkers::{ClientTrait, Connection, ServerTrait},
+};
 
 pub struct TCPConnection {
     stream: TcpStream,
@@ -16,8 +15,6 @@ pub struct TCPConnection {
 }
 
 impl Connection for TCPConnection {
-    type Error = io::Error;
-
     fn get_info(&self) -> String {
         format!(
             "tcp://{}",
@@ -33,7 +30,7 @@ impl Connection for TCPConnection {
         self.is_alive
     }
 
-    fn read(&mut self) -> Result<String, Self::Error> {
+    fn read(&mut self) -> Result<String, Error> {
         let mut line = String::new();
         let n = self.reader.read_line(&mut line)?;
 
@@ -45,79 +42,78 @@ impl Connection for TCPConnection {
         Ok(line.trim_end().to_string())
     }
 
-    fn write(&mut self, data: &str) -> Result<(), Self::Error> {
+    fn write(&mut self, data: &str) -> Result<(), Error> {
+        info!("Sent: {}", data);
         writeln!(self.stream, "{}", data)?;
         self.stream.flush()?;
         Ok(())
     }
 }
 
-impl AsyncConnection<TCPConnection> for TCPConnection {
-    type Error = io::Error;
+// impl AsyncConnection<TCPConnection> for TCPConnection {
+//     type Error = io::Error;
 
-    fn as_async<T: Serialize + DeserializeOwned + Send + 'static>(
-        connection: TCPConnection,
-    ) -> (Sender<T>, Receiver<T>) {
-        let (send_tx, send_rx) = crossbeam_channel::unbounded::<T>();
-        let (recv_tx, recv_rx) = crossbeam_channel::unbounded::<T>();
+//     fn as_async<T: Serialize + DeserializeOwned + Send + 'static>(
+//         connection: TCPConnection,
+//     ) -> (Sender<T>, Receiver<T>) {
+//         let (send_tx, send_rx) = crossbeam_channel::unbounded::<T>();
+//         let (recv_tx, recv_rx) = crossbeam_channel::unbounded::<T>();
 
-        thread::spawn(move || {
-            let mut reader = connection.reader;
+//         thread::spawn(move || {
+//             let mut reader = connection.reader;
 
-            let mut read = || -> Result<String, Self::Error> {
-                let mut line = String::new();
-                let _ = reader.read_line(&mut line)?;
+//             let mut read = || -> Result<String, Self::Error> {
+//                 let mut line = String::new();
+//                 let _ = reader.read_line(&mut line)?;
 
-                Ok(line.trim_end().to_string())
-            };
+//                 Ok(line.trim_end().to_string())
+//             };
 
-            loop {
-                if let Ok(data) = read() {
-                    if data.is_empty() {
-                        break;
-                    }
-                    info!("Got {}", data);
-                    if let Ok(decoded) = serde_json::from_str::<T>(&data) {
-                        if let Err(e) = send_tx.send(decoded) {
-                            error!("Got error: {}", e);
-                        }
-                    }
-                }
-            }
-        });
+//             loop {
+//                 if let Ok(data) = read() {
+//                     if data.is_empty() {
+//                         break;
+//                     }
+//                     info!("Got {}", data);
+//                     if let Ok(decoded) = serde_json::from_str::<T>(&data) {
+//                         if let Err(e) = send_tx.send(decoded) {
+//                             error!("Got error: {}", e);
+//                         }
+//                     }
+//                 }
+//             }
+//         });
 
-        thread::spawn(move || {
-            let mut stream = connection.stream;
+//         thread::spawn(move || {
+//             let mut stream = connection.stream;
 
-            let mut write = |data: String| -> Result<(), Self::Error> {
-                writeln!(stream, "{}", data)?;
-                stream.flush()?;
-                Ok(())
-            };
+//             let mut write = |data: String| -> Result<(), Self::Error> {
+//                 writeln!(stream, "{}", data)?;
+//                 stream.flush()?;
+//                 Ok(())
+//             };
 
-            loop {
-                if let Ok(data) = recv_rx.recv() {
-                    if let Ok(encoded) = serde_json::to_string(&data) {
-                        info!("Write {}", encoded);
-                        if let Err(e) = write(encoded) {
-                            error!("Got error: {}", e);
-                        }
-                    }
-                }
-            }
-        });
+//             loop {
+//                 if let Ok(data) = recv_rx.recv() {
+//                     if let Ok(encoded) = serde_json::to_string(&data) {
+//                         info!("Write {}", encoded);
+//                         if let Err(e) = write(encoded) {
+//                             error!("Got error: {}", e);
+//                         }
+//                     }
+//                 }
+//             }
+//         });
 
-        (recv_tx, send_rx)
-    }
-}
+//         (recv_tx, send_rx)
+//     }
+// }
 
 pub struct TCPServer {
     listener: TcpListener,
 }
 
 impl ServerTrait<TCPConnection> for TCPServer {
-    type Error = io::Error;
-
     fn get_info(&self) -> String {
         format!(
             "tcp://{}",
@@ -129,7 +125,7 @@ impl ServerTrait<TCPConnection> for TCPServer {
         )
     }
 
-    fn accept(&self) -> Result<TCPConnection, Self::Error> {
+    fn accept(&self) -> Result<TCPConnection, Error> {
         let (stream, _) = self.listener.accept()?;
         let reader = BufReader::new(stream.try_clone()?);
         Ok(TCPConnection {
@@ -139,7 +135,7 @@ impl ServerTrait<TCPConnection> for TCPServer {
         })
     }
 
-    fn bind(address: &SocketAddr) -> Result<Self, Self::Error> {
+    fn bind(address: &SocketAddr) -> Result<Self, Error> {
         let listener = TcpListener::bind(address)?;
         Ok(Self { listener })
     }
@@ -148,9 +144,7 @@ impl ServerTrait<TCPConnection> for TCPServer {
 pub struct TCPClient;
 
 impl ClientTrait<TCPConnection> for TCPClient {
-    type Error = io::Error;
-
-    fn connect(address: &SocketAddr) -> Result<TCPConnection, Self::Error> {
+    fn connect(address: &SocketAddr) -> Result<TCPConnection, Error> {
         let stream = TcpStream::connect(address)?;
         let reader = BufReader::new(stream.try_clone()?);
         let conn = TCPConnection {
@@ -158,7 +152,6 @@ impl ClientTrait<TCPConnection> for TCPClient {
             reader,
             is_alive: true,
         };
-        info!("Connected to {}", conn.get_info());
         Ok(conn)
     }
 }

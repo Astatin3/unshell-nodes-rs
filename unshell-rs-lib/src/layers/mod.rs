@@ -1,9 +1,14 @@
-pub trait Layer: Serialize + Deserialize<'static> + Sized {
-    fn encode(&mut self, data: &[u8]) -> Vec<u8>;
-    fn decode(&mut self, data: &[u8]) -> Vec<u8>;
+pub enum LayerConfig {
+    Base64,
+    Handshake,
 }
 
 pub mod base64;
+mod builder;
+pub mod handshake;
 
-pub use base64::Base64;
-use serde::{Deserialize, Serialize};
+pub use base64::Base64Layer;
+pub use handshake::HandshakeLayer;
+
+pub use builder::build_client;
+pub use builder::create_server_builder;

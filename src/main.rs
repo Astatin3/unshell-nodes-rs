@@ -7,7 +7,9 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use log::error;
-use unshell_rs::{UnshellClient, UnshellGui, UnshellServer};
+use unshell_rs::Cli;
+use unshell_rs_lib::connection::Node;
+// use unshell_rs::{UnshellClient, UnshellGui, UnshellServer};
 // use unshell_rs
 
 pub static DEFAULT_CONFIG_FILEPATH: &'static str = "server_config.json";
@@ -32,7 +34,7 @@ struct Args {
 enum Commands {
     /// Run as a service, and potentially hosting a website
     #[command(arg_required_else_help = true)]
-    Server {
+    Relay {
         /// IPv4 to listen for clients on.
         host: String,
 
@@ -47,20 +49,14 @@ enum Commands {
         // #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
         // web_port: u16,
     },
-    /// Run GUI and connect to remote server
-    Remote {
+    /// Connect to remote server
+    Connect {
         /// Remote server to connect to
         host: String,
 
         /// Port listen to for command clients
         #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
         port: u16,
-    },
-    /// Run both server and GUI on local machine.
-    Local {
-        /// Json file to store config
-        #[arg(short, long, default_value_t = DEFAULT_CONFIG_FILEPATH.to_string())]
-        config_filepath: String,
     },
 }
 
@@ -73,41 +69,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
     match args.command {
-        Commands::Local { config_filepath } => {
-            let mut server = UnshellServer::from_filepath(config_filepath.as_str());
-            server.run(LOCAL_SOCKET)?;
-
-            let client = UnshellClient::new(LOCAL_SOCKET)?;
-
-            UnshellGui::start(client)?;
-        }
-        Commands::Remote { host, port } => {
-            let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
-            let client = UnshellClient::new(if let Ok(addr) = addr {
-                addr
-            } else {
-                error!("Could not parse address!");
-                return Ok(());
-            })?;
-
-            UnshellGui::start(client)?;
-        }
-        Commands::Server {
+        Commands::Relay {
             host,
             port,
             config_filepath,
         } => {
-            let mut unshell_server = UnshellServer::from_filepath(config_filepath.as_str());
-
             let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
-            if let Ok(addr) = addr {
-                unshell_server.run(addr)?;
+            if let Err(e) = Node::run(if let Ok(addr) = addr {
+                addr
             } else {
                 error!("Could not parse address!");
                 return Ok(());
+            }) {
+                error!("{}", e);
             }
-
-            loop {}
+        }
+        Commands::Connect { host, port } => {
+            let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
+            if let Err(e) = Cli::connect(if let Ok(addr) = addr {
+                addr
+            } else {
+                error!("Could not parse address!");
+                return Ok(());
+            }) {
+                error!("{}", e);
+            }
         }
     };
 

@@ -1,6 +1,3 @@
-mod gui;
+mod cli;
 
-mod client;
-
-pub use client::UnshellClient;
-pub use gui::UnshellGui;
+pub use cli::Cli;
