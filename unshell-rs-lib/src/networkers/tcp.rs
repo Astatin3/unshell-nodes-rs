@@ -1,5 +1,4 @@
 use std::{
-    error::Error,
     io::{self, BufRead, BufReader, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     thread,
@@ -62,13 +61,12 @@ impl AsyncConnection<TCPConnection> for TCPConnection {
         let (send_tx, send_rx) = crossbeam_channel::unbounded::<T>();
         let (recv_tx, recv_rx) = crossbeam_channel::unbounded::<T>();
 
-        let tx_clone = send_tx.clone();
         thread::spawn(move || {
             let mut reader = connection.reader;
 
             let mut read = || -> Result<String, Self::Error> {
                 let mut line = String::new();
-                let n = reader.read_line(&mut line)?;
+                let _ = reader.read_line(&mut line)?;
 
                 Ok(line.trim_end().to_string())
             };
@@ -80,7 +78,7 @@ impl AsyncConnection<TCPConnection> for TCPConnection {
                     }
                     info!("Got {}", data);
                     if let Ok(decoded) = serde_json::from_str::<T>(&data) {
-                        if let Err(e) = tx_clone.send(decoded) {
+                        if let Err(e) = send_tx.send(decoded) {
                             error!("Got error: {}", e);
                         }
                     }
@@ -88,7 +86,6 @@ impl AsyncConnection<TCPConnection> for TCPConnection {
             }
         });
 
-        let rx_clone = recv_rx.clone();
         thread::spawn(move || {
             let mut stream = connection.stream;
 
@@ -99,7 +96,7 @@ impl AsyncConnection<TCPConnection> for TCPConnection {
             };
 
             loop {
-                if let Ok(data) = rx_clone.recv() {
+                if let Ok(data) = recv_rx.recv() {
                     if let Ok(encoded) = serde_json::to_string(&data) {
                         info!("Write {}", encoded);
                         if let Err(e) = write(encoded) {

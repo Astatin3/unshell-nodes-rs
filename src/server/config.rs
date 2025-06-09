@@ -2,8 +2,6 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use unshell_rs_lib::config::campaign::CampaignConfig;
 
-use std::collections::HashMap;
-
 use unshell_rs_lib::connection::Parameters;
 
 lazy_static! {

@@ -1,23 +1,19 @@
 use std::{
-    collections::HashMap,
     error::Error,
     fs::File,
     io::Read,
     net::SocketAddr,
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
 };
 
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Sender;
 use serde::{Deserialize, Serialize};
 
 use unshell_rs_lib::{
     config::campaign::CampaignConfig,
     connection::{C2Packet, ErrorPacket, Parameters},
-    networkers::{
-        AsyncConnection, Connection, ServerTrait, TCPConnection, TCPServer, run_listener_state,
-    },
+    networkers::{AsyncConnection, ServerTrait, TCPConnection, TCPServer, run_listener_state},
 };
 
 use crate::server::{DEFAULT_CAMPAIGN, DEFAULT_USERS, User, config::DEFAULT_PARAMETERS};
@@ -72,12 +68,6 @@ impl UnshellServer {
                 })),
             }
         });
-
-        // let (broadcast_tx, broadcast_rx) = crossbeam_channel::unbounded::<String>();
-        // let mut config_lock = s.config.lock().unwrap();
-        // config_lock.broadcast_tx = Some(broadcast_tx);
-        // config_lock.broadcast_rx = Some(broadcast_rx);
-        // std::mem::drop(config_lock);
 
         s
     }
