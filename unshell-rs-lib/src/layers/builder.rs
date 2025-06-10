@@ -4,7 +4,7 @@ use crate::{
     networkers::{Connection, ProtocolLayer},
 };
 
-impl Connection for Box<dyn Connection + Send> {
+impl Connection for Box<dyn Connection + Send + Sync> {
     fn get_info(&self) -> String {
         (**self).get_info()
     }
@@ -20,9 +20,16 @@ impl Connection for Box<dyn Connection + Send> {
     fn write(&mut self, data: &str) -> Result<(), Error> {
         (**self).write(data)
     }
+
+    fn try_clone(&self) -> Result<Box<dyn Connection + Send + Sync>, Error> {
+        Ok(Box::new((**self).try_clone()?))
+    }
 }
 
-pub fn build_client<C>(base_conn: C, layers: Vec<LayerConfig>) -> Result<Box<dyn Connection>, Error>
+pub fn build_client<C>(
+    base_conn: C,
+    layers: Vec<LayerConfig>,
+) -> Result<Box<dyn Connection + Send>, Error>
 where
     C: Connection + 'static,
 {

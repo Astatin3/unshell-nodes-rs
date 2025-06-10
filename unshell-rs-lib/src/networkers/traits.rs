@@ -1,21 +1,21 @@
 use std::net::SocketAddr;
-use std::ops::Deref;
-use std::ops::DerefMut;
 
 use crate::Error;
 
-// This is the lowset-level data transmission type
-pub trait Connection: Send {
+// This is the data transmission type
+pub trait Connection: Send + Sync {
     fn get_info(&self) -> String;
     fn is_alive(&self) -> bool;
 
     fn read(&mut self) -> Result<String, Error>;
     fn write(&mut self, data: &str) -> Result<(), Error>;
+
+    fn try_clone(&self) -> Result<Box<dyn Connection + Send + Sync>, Error>;
 }
 
 // Trait for protocol layers that can be initialized
-pub trait ProtocolLayer<C: Connection>: Connection {
-    fn new(inner: C) -> Result<Self, Error>
+pub trait ProtocolLayer: Connection {
+    fn new(inner: Box<dyn Connection>) -> Result<Self, Error>
     where
         Self: Sized;
     fn initialize_client(&mut self) -> Result<(), Error> {

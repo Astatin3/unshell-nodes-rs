@@ -1,11 +1,15 @@
+use serde::Deserialize;
+use serde::Serialize;
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum LayerConfig {
     Base64,
     Handshake,
 }
 
-pub mod base64;
+mod base64;
 mod builder;
-pub mod handshake;
+mod handshake;
 
 pub use base64::Base64Layer;
 pub use handshake::HandshakeLayer;

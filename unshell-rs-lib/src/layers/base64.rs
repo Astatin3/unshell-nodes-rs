@@ -3,13 +3,12 @@ use crate::{
     networkers::{Connection, ProtocolLayer},
 };
 use base64::{Engine as _, engine::general_purpose};
-use serde::{Deserialize, Serialize};
 
-pub struct Base64Layer<C: Connection> {
-    inner: C,
+pub struct Base64Layer {
+    inner: Box<dyn Connection>,
 }
 
-impl<C: Connection> Connection for Base64Layer<C> {
+impl Connection for Base64Layer {
     fn get_info(&self) -> String {
         format!("b64->{}", self.inner.get_info())
     }
@@ -29,16 +28,18 @@ impl<C: Connection> Connection for Base64Layer<C> {
     }
 
     fn write(&mut self, data: &str) -> Result<(), Error> {
-        info!("Bsae");
+        self.inner.write(&general_purpose::STANDARD.encode(data))
+    }
 
-        self.inner.write(&general_purpose::STANDARD.encode(data))?;
-
-        Ok(())
+    fn try_clone(&self) -> Result<Box<dyn Connection + Send + Sync>, Error> {
+        Ok(Box::new(Self {
+            inner: self.inner.try_clone()?,
+        }))
     }
 }
 
-impl<C: Connection> ProtocolLayer<C> for Base64Layer<C> {
-    fn new(inner: C) -> Result<Self, Error> {
+impl ProtocolLayer for Base64Layer {
+    fn new(inner: Box<dyn Connection>) -> Result<Self, Error> {
         Ok(Base64Layer { inner })
     }
 }

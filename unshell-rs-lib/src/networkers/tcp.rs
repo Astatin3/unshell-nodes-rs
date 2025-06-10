@@ -1,6 +1,10 @@
 use std::{
-    io::{self, BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Write},
     net::{SocketAddr, TcpListener, TcpStream},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use crate::{
@@ -11,7 +15,7 @@ use crate::{
 pub struct TCPConnection {
     stream: TcpStream,
     reader: BufReader<TcpStream>,
-    is_alive: bool,
+    is_alive: Arc<AtomicBool>,
 }
 
 impl Connection for TCPConnection {
@@ -27,7 +31,7 @@ impl Connection for TCPConnection {
     }
 
     fn is_alive(&self) -> bool {
-        self.is_alive
+        self.is_alive.load(Ordering::Relaxed)
     }
 
     fn read(&mut self) -> Result<String, Error> {
@@ -36,78 +40,29 @@ impl Connection for TCPConnection {
 
         // Stream sends a null buffer if it is disconnected
         if n == 0 {
-            self.is_alive = false;
+            self.is_alive.swap(false, Ordering::Relaxed);
         }
+
+        // println!("Recieved: {}", line.trim_end().to_string());
 
         Ok(line.trim_end().to_string())
     }
 
     fn write(&mut self, data: &str) -> Result<(), Error> {
-        info!("Sent: {}", data);
+        // println!("Recsent: {}", data);
         writeln!(self.stream, "{}", data)?;
         self.stream.flush()?;
         Ok(())
     }
+
+    fn try_clone(&self) -> Result<Box<dyn Connection + Send + Sync>, Error> {
+        Ok(Box::new(Self {
+            stream: self.stream.try_clone()?,
+            reader: BufReader::new(self.stream.try_clone()?),
+            is_alive: Arc::clone(&self.is_alive),
+        }))
+    }
 }
-
-// impl AsyncConnection<TCPConnection> for TCPConnection {
-//     type Error = io::Error;
-
-//     fn as_async<T: Serialize + DeserializeOwned + Send + 'static>(
-//         connection: TCPConnection,
-//     ) -> (Sender<T>, Receiver<T>) {
-//         let (send_tx, send_rx) = crossbeam_channel::unbounded::<T>();
-//         let (recv_tx, recv_rx) = crossbeam_channel::unbounded::<T>();
-
-//         thread::spawn(move || {
-//             let mut reader = connection.reader;
-
-//             let mut read = || -> Result<String, Self::Error> {
-//                 let mut line = String::new();
-//                 let _ = reader.read_line(&mut line)?;
-
-//                 Ok(line.trim_end().to_string())
-//             };
-
-//             loop {
-//                 if let Ok(data) = read() {
-//                     if data.is_empty() {
-//                         break;
-//                     }
-//                     info!("Got {}", data);
-//                     if let Ok(decoded) = serde_json::from_str::<T>(&data) {
-//                         if let Err(e) = send_tx.send(decoded) {
-//                             error!("Got error: {}", e);
-//                         }
-//                     }
-//                 }
-//             }
-//         });
-
-//         thread::spawn(move || {
-//             let mut stream = connection.stream;
-
-//             let mut write = |data: String| -> Result<(), Self::Error> {
-//                 writeln!(stream, "{}", data)?;
-//                 stream.flush()?;
-//                 Ok(())
-//             };
-
-//             loop {
-//                 if let Ok(data) = recv_rx.recv() {
-//                     if let Ok(encoded) = serde_json::to_string(&data) {
-//                         info!("Write {}", encoded);
-//                         if let Err(e) = write(encoded) {
-//                             error!("Got error: {}", e);
-//                         }
-//                     }
-//                 }
-//             }
-//         });
-
-//         (recv_tx, send_rx)
-//     }
-// }
 
 pub struct TCPServer {
     listener: TcpListener,
@@ -131,7 +86,7 @@ impl ServerTrait<TCPConnection> for TCPServer {
         Ok(TCPConnection {
             stream,
             reader,
-            is_alive: true,
+            is_alive: Arc::new(AtomicBool::new(true)),
         })
     }
 
@@ -150,7 +105,7 @@ impl ClientTrait<TCPConnection> for TCPClient {
         let conn = TCPConnection {
             stream,
             reader,
-            is_alive: true,
+            is_alive: Arc::new(AtomicBool::new(true)),
         };
         Ok(conn)
     }

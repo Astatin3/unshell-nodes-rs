@@ -8,9 +8,10 @@ use std::{
 use clap::{Parser, Subcommand};
 use log::error;
 use unshell_rs::Cli;
-use unshell_rs_lib::connection::Node;
-// use unshell_rs::{UnshellClient, UnshellGui, UnshellServer};
-// use unshell_rs
+use unshell_rs_lib::{
+    connection::{ConnectionConfig, Node},
+    layers::LayerConfig,
+};
 
 pub static DEFAULT_CONFIG_FILEPATH: &'static str = "server_config.json";
 
@@ -32,23 +33,27 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Run as a service, and potentially hosting a website
-    #[command(arg_required_else_help = true)]
-    Relay {
-        /// IPv4 to listen for clients on.
-        host: String,
+    Start,
+    Middle,
+    End,
 
-        /// Port listen to for command clients
-        #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
-        port: u16,
+    // Run as a service, and potentially hosting a website
+    // #[command(arg_required_else_help = true)]
+    // Relay {
+    //     /// IPv4 to listen for clients on.
+    //     host: String,
 
-        /// Json file to store config
-        #[arg(short, long, default_value_t = DEFAULT_CONFIG_FILEPATH.to_string())]
-        config_filepath: String,
-        // /// Port to listen for website traffic (0 is disabled)
-        // #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
-        // web_port: u16,
-    },
+    //     /// Port listen to for command clients
+    //     #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
+    //     port: u16,
+
+    //     /// Json file to store config
+    //     #[arg(short, long, default_value_t = DEFAULT_CONFIG_FILEPATH.to_string())]
+    //     config_filepath: String,
+    //     // /// Port to listen for website traffic (0 is disabled)
+    //     // #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
+    //     // web_port: u16,
+    // },
     /// Connect to remote server
     Connect {
         /// Remote server to connect to
@@ -68,33 +73,52 @@ fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
     let args = Args::parse();
 
-    match args.command {
-        Commands::Relay {
-            host,
-            port,
-            config_filepath,
-        } => {
-            let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
-            if let Err(e) = Node::run(if let Ok(addr) = addr {
-                addr
-            } else {
-                error!("Could not parse address!");
-                return Ok(());
-            }) {
-                error!("{}", e);
-            }
-        }
+    if let Err(e) = match args.command {
+        // Commands::Relay { host, port, .. } => {
+        //     let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
+        //     if let Err(e) = Node::run() {
+        //         error!("{}", e);
+        //     }
+        // }
+        Commands::Start {} => Node::run_master(
+            ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13370")?,
+                layers: vec![],
+            },
+            vec![ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13371")?,
+                layers: vec![],
+            }],
+        ),
+        Commands::Middle {} => Node::run_node(
+            ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13371")?,
+                layers: vec![],
+            },
+            vec![ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13372")?,
+                layers: vec![LayerConfig::Base64],
+            }],
+        ),
+        Commands::End {} => Node::run_node(
+            ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13372")?,
+                layers: vec![LayerConfig::Base64],
+            },
+            vec![],
+        ),
+
         Commands::Connect { host, port } => {
             let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
-            if let Err(e) = Cli::connect(if let Ok(addr) = addr {
+            Cli::connect(if let Ok(addr) = addr {
                 addr
             } else {
                 error!("Could not parse address!");
                 return Ok(());
-            }) {
-                error!("{}", e);
-            }
+            })
         }
+    } {
+        error!("{}", e);
     };
 
     Ok(())
