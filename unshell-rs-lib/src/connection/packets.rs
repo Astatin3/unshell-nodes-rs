@@ -2,23 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::Error;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Packets {
-    GetConnections,
-    UpdateConnections(Vec<String>),
-
-    GetRoutes,
-    UpdateRoutes(Vec<String>),
-
-    OnClientConnect { id: String, route: Vec<String> },
-    OnClientDisconnect { id: String },
-
-    Error(PacketError),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum PacketError {
-    UnsupportedType,
+    UpdateRoutes(String, Vec<String>),
+    Connect(String),
+    Disconnect(String),
+    Data { source: String, data: String },
 }
 
 impl Packets {

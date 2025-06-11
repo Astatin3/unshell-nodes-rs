@@ -1,72 +1,71 @@
-use std::{io::Write, net::SocketAddr, thread};
-
 use unshell_rs_lib::{
     Error,
-    connection::{PacketError, Packets},
-    layers::build_client,
-    networkers::{ClientTrait, Connection, TCPClient},
+    connection::{ConnectionConfig, Node},
 };
 pub struct Cli;
 
 impl Cli {
-    pub fn connect(addr: SocketAddr) -> Result<(), Error> {
-        let mut client = build_client(TCPClient::connect(&addr)?, vec![])?;
+    pub fn connect(
+        id: String,
+        clients: Vec<ConnectionConfig>,
+        listeners: Vec<ConnectionConfig>,
+    ) -> Result<(), Error> {
+        // let mut client = build_client(TCPClient::connect(&addr)?, vec![])?;
 
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
+        // let stdin = std::io::stdin();
+        // let mut stdout = std::io::stdout();
 
-        let mut client_clone = client.try_clone()?;
-        thread::spawn(move || {
-            // let data = client.read()?;
+        Node::run_node(id, clients, listeners)
 
-            let packet = Packets::decode(client_clone.read().unwrap().as_str()).unwrap();
+        // let mut client_clone = client.try_clone()?;
+        // thread::spawn(move || {
+        //     // let data = client.read()?;
 
-            match packet {
-                Packets::UpdateConnections(items) => {
-                    for item in items {
-                        println!("{}", item);
-                    }
-                }
-                Packets::UpdateRoutes(items) => {
-                    for item in items {
-                        println!("{}", item);
-                    }
-                }
-                _ => {
-                    client_clone
-                        .write(
-                            Packets::Error(PacketError::UnsupportedType)
-                                .encode()
-                                .unwrap()
-                                .as_str(),
-                        )
-                        .unwrap();
-                    warn!("Invalid packet: {:?}", packet)
-                }
-            }
-        });
+        //     let packet = Packets::decode(client_clone.read().unwrap().as_str()).unwrap();
 
-        loop {
-            print!("> ");
-            stdout.flush()?;
+        //     match packet {
+        //         Packets::UpdateConnections(items) => {
+        //             for item in items {
+        //                 println!("{}", item);
+        //             }
+        //         }
+        //         Packets::UpdateRoutes(items) => {
+        //             for item in items {
+        //                 println!("{}", item);
+        //             }
+        //         }
+        //         _ => {
+        //             client_clone
+        //                 .write(
+        //                     Packets::Error(PacketError::UnsupportedType)
+        //                         .encode()
+        //                         .unwrap()
+        //                         .as_str(),
+        //                 )
+        //                 .unwrap();
+        //             warn!("Invalid packet: {:?}", packet)
+        //         }
+        //     }
+        // });
 
-            let mut input = String::new();
-            stdin.read_line(&mut input)?;
-            let input = input.trim();
+        // loop {
+        //     print!("> ");
+        //     stdout.flush()?;
 
-            match input.split(" ").nth(0).unwrap() {
-                "clients" => {
-                    client.write(Packets::GetConnections.encode()?.as_str())?;
-                }
-                "routes" => {
-                    client.write(Packets::GetRoutes.encode()?.as_str())?;
-                }
-                _ => {
-                    warn!("Invalid command!")
-                }
-            }
+        //     let mut input = String::new();
+        //     stdin.read_line(&mut input)?;
+        //     let input = input.trim();
 
-            // client.write(input)?;
-        }
+        //     match input.split(" ").nth(0).unwrap() {
+        //         "ping" => {
+        //             // client.write(Packets::GetConnections.encode()?.as_str())?;
+        //         }
+        //         _ => {
+        //             warn!("Invalid command!")
+        //         }
+        //     }
+
+        //     // client.write(input)?;
+        // }
     }
 }

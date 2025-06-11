@@ -8,10 +8,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use log::error;
 use unshell_rs::Cli;
-use unshell_rs_lib::{
-    connection::{ConnectionConfig, Node},
-    layers::LayerConfig,
-};
+use unshell_rs_lib::connection::ConnectionConfig;
 
 pub static DEFAULT_CONFIG_FILEPATH: &'static str = "server_config.json";
 
@@ -33,10 +30,16 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    Start,
-    Middle,
-    End,
-
+    // Start,
+    // Middle,
+    // End,
+    //
+    Test1,
+    Test2,
+    Test3,
+    Test4,
+    Test5,
+    Test6,
     // Run as a service, and potentially hosting a website
     // #[command(arg_required_else_help = true)]
     // Relay {
@@ -54,15 +57,15 @@ enum Commands {
     //     // #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
     //     // web_port: u16,
     // },
-    /// Connect to remote server
-    Connect {
-        /// Remote server to connect to
-        host: String,
+    // /// Connect to remote server
+    // Connect {
+    //     /// Remote server to connect to
+    //     host: String,
 
-        /// Port listen to for command clients
-        #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
-        port: u16,
-    },
+    //     /// Port listen to for command clients
+    //     #[arg(short, long, default_value_t = DEFAULT_SERVICE_PORT)]
+    //     port: u16,
+    // },
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -80,43 +83,87 @@ fn main() -> Result<(), Box<dyn Error>> {
         //         error!("{}", e);
         //     }
         // }
-        Commands::Start {} => Node::run_master(
-            ConnectionConfig {
-                socket: SocketAddr::from_str("127.0.0.1:13370")?,
-                layers: vec![],
-            },
+        Commands::Test1 {} => Cli::connect(
+            "Test1".to_string(),
+            vec![],
             vec![ConnectionConfig {
                 socket: SocketAddr::from_str("127.0.0.1:13371")?,
                 layers: vec![],
             }],
         ),
-        Commands::Middle {} => Node::run_node(
-            ConnectionConfig {
+        Commands::Test2 {} => Cli::connect(
+            "Test2".to_string(),
+            vec![ConnectionConfig {
                 socket: SocketAddr::from_str("127.0.0.1:13371")?,
                 layers: vec![],
-            },
+            }],
             vec![ConnectionConfig {
                 socket: SocketAddr::from_str("127.0.0.1:13372")?,
-                layers: vec![LayerConfig::Base64],
+                layers: vec![],
             }],
         ),
-        Commands::End {} => Node::run_node(
-            ConnectionConfig {
+        Commands::Test3 {} => Cli::connect(
+            "Test3".to_string(),
+            vec![ConnectionConfig {
                 socket: SocketAddr::from_str("127.0.0.1:13372")?,
-                layers: vec![LayerConfig::Base64],
-            },
+                layers: vec![],
+            }],
+            vec![ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13373")?,
+                layers: vec![],
+            }],
+        ),
+        Commands::Test4 {} => Cli::connect(
+            "Test4".to_string(),
+            vec![ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13371")?,
+                layers: vec![],
+            }],
+            vec![ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13374")?,
+                layers: vec![],
+            }],
+        ),
+        Commands::Test5 {} => Cli::connect(
+            "Test5".to_string(),
+            vec![
+                ConnectionConfig {
+                    socket: SocketAddr::from_str("127.0.0.1:13372")?,
+                    layers: vec![],
+                },
+                ConnectionConfig {
+                    socket: SocketAddr::from_str("127.0.0.1:13374")?,
+                    layers: vec![],
+                },
+            ],
+            vec![ConnectionConfig {
+                socket: SocketAddr::from_str("127.0.0.1:13375")?,
+                layers: vec![],
+            }],
+        ),
+        Commands::Test6 {} => Cli::connect(
+            "Test6".to_string(),
+            vec![
+                ConnectionConfig {
+                    socket: SocketAddr::from_str("127.0.0.1:13373")?,
+                    layers: vec![],
+                },
+                ConnectionConfig {
+                    socket: SocketAddr::from_str("127.0.0.1:13375")?,
+                    layers: vec![],
+                },
+            ],
             vec![],
         ),
-
-        Commands::Connect { host, port } => {
-            let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
-            Cli::connect(if let Ok(addr) = addr {
-                addr
-            } else {
-                error!("Could not parse address!");
-                return Ok(());
-            })
-        }
+        // Commands::Connect { host, port } => {
+        //     let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
+        //     Cli::connect(if let Ok(addr) = addr {
+        //         addr
+        //     } else {
+        //         error!("Could not parse address!");
+        //         return Ok(());
+        //     })
+        // }
     } {
         error!("{}", e);
     };

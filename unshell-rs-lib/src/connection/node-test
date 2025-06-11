@@ -1,9 +1,12 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
-    thread,
+    f32::consts::PI,
+    sync::{Arc, Mutex, MutexGuard},
+    thread::{self, Thread},
     time::Duration,
 };
+
+use uuid::Uuid;
 
 use crate::{
     Error,
@@ -74,7 +77,7 @@ impl Node {
         Self::run_connection(
             build_client(TCPClient::connect(&client.socket)?, client.layers)?,
             state,
-        )?;
+        );
 
         Ok(())
     }
@@ -84,16 +87,11 @@ impl Node {
         state: Arc<Mutex<Node>>,
     ) {
         thread::spawn(move || {
-            if let Err(e) = Self::run_connection(connection, &state) {
-                error!("{}", e);
-            }
+            Self::run_connection(connection, &state);
         });
     }
 
-    fn run_connection(
-        connection: Box<dyn Connection + Send + 'static>,
-        state: &Arc<Mutex<Node>>,
-    ) -> Result<(), Error> {
+    fn run_connection(connection: Box<dyn Connection + Send + 'static>, state: &Arc<Mutex<Node>>) {
         let mut connection = connection;
         let s = state.lock().unwrap();
 
@@ -102,29 +100,44 @@ impl Node {
 
         write(
             &mut connection,
-            Packets::UpdateRoutes(
-                this_uuid,
-                (&mut state.lock().unwrap()).get_self_and_known_clients(),
-            ),
-        )?;
+            Packets::UpdateRoutes(this_uuid, (&mut state.lock().unwrap()).get_known_clients()),
+        )
+        .unwrap();
 
-        let other_uuid = if let Packets::UpdateRoutes(src, routes) = read(&mut connection)? {
+        let other_uuid = if let Ok(Packets::UpdateRoutes(src, routes)) = read(&mut connection) {
             (&mut state.lock().unwrap()).extend_routes(src.clone(), routes);
             src
         } else {
-            return Err("Could not get UUID!".into());
+            error!("Could not get UUID!");
+            return;
         };
 
         // info!("Connection: {}", other_uuid);
 
         (&mut state.lock().unwrap())
             .connections
-            .insert(other_uuid.clone(), connection.try_clone()?);
+            .insert(other_uuid.clone(), connection.try_clone().unwrap());
+
+        // (&mut state.lock().unwrap()).connect(other_uuid.clone(), None);
+
+        // let is_root = s.parent.is_none();
 
         loop {
             match read(&mut connection) {
                 Ok(packet) => {
                     let result: Result<(), Error> = match packet {
+                        // Packets::UpdateRoutes(src, routes) => {
+                        //     Ok((&mut state.lock().unwrap()).extend_routes(src, routes))
+                        // }
+                        // Packets::Connect(id) => {
+                        //     let source = if other_uuid == id {
+                        //         None
+                        //     } else {
+                        //         Some(other_uuid.clone())
+                        //     };
+
+                        //     Ok((&mut state.lock().unwrap()).connect(id, source))
+                        // }
                         Packets::Disconnect(id) => {
                             let direct = other_uuid == id;
                             Ok((&mut state.lock().unwrap()).disconnect(id, direct))
@@ -157,22 +170,67 @@ impl Node {
                 }
             }
         }
-
-        Ok(())
     }
+
+    // fn get_best_route(&self, uuid: &String) -> Result<(usize, String), Error> {
+    //     let routes = self.map.get(uuid).ok_or("Route does not exist!")?;
+
+    //     if routes.is_empty() {
+    //         return Ok((0, uuid.clone()));
+    //     }
+
+    //     let mut min_hops = usize::MAX;
+    //     let mut min_uuid = "".to_string();
+
+    //     for (hops, uuid) in routes.iter() {
+    //         if hops < &min_hops {
+    //             min_hops = hops.clone();
+    //             min_uuid = uuid.clone();
+    //         }
+    //     }
+
+    //     Ok((min_hops, min_uuid))
+    // }
+
+    // fn route_get_index_of_uuid(routes: &Vec<(usize, String)>, uuid: &String) -> Option<usize> {
+    //     for (i, route) in routes.iter().enumerate() {
+    //         if &route.1 == uuid {
+    //             return Some(i);
+    //         }
+    //     }
+
+    //     return None;
+    // }
+
+    // fn route_inc_one(routes: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    //     routes.iter().map(|r| (r.0 + 1, *r.1)).collect()
+    // }
+
+    // fn get_known_routes(&self) -> Vec<(usize, String)> {
+    //     let mut routes = self
+    //         .map
+    //         .keys()
+    //         .map(|k| self.get_best_route(k).unwrap())
+    //         .collect::<Vec<(usize, String)>>();
+
+    //     routes.push((0, self.id.clone()));
+
+    //     println!("Known routes: {:?}", routes);
+
+    //     routes
+    // }
 
     fn get_known_clients(&self) -> Vec<String> {
-        self.map.keys().map(|k| k.clone()).collect::<Vec<String>>()
-    }
+        let mut clients = self.map.keys().map(|k| k.clone()).collect::<Vec<String>>();
 
-    fn get_self_and_known_clients(&self) -> Vec<String> {
-        let mut clients = self.get_known_clients();
         clients.push(self.id.clone());
+
         clients
     }
 
     fn knows_client(&self, id: &String) -> bool {
         self.get_known_clients().contains(id)
+        // self.connections.contains_key(id)
     }
 
     fn broadcast(&mut self, data: Packets, disclude: Option<&String>) {
@@ -188,35 +246,51 @@ impl Node {
 
     fn broadcast_table(&mut self, disclude: Option<&String>) {
         self.broadcast(
-            Packets::UpdateRoutes(self.id.clone(), self.get_self_and_known_clients()),
+            Packets::UpdateRoutes(self.id.clone(), self.get_known_clients()),
             disclude,
         );
     }
+
+    // fn connect(&mut self, id: String, source: Option<String>) {
+    //     if !self.knows_client(&id) && id != self.id {
+    //         self.broadcast(Packets::Connect(id.clone()), Some(&id));
+    //         if let Some(source) = source {
+    //             // Is direct
+    //             self.extend_routes(id.clone(), vec![(9999, source.clone())]);
+    //             self.broadcast_table(None);
+    //         } else {
+    //             self.map.insert(id.clone(), Vec::new());
+    //             self.broadcast_table(None);
+    //         }
+    //         self.print_map();
+    //     }
+    // }
 
     fn disconnect(&mut self, id: String, direct: bool) {
         if self.knows_client(&id) {
             self.broadcast(Packets::Disconnect(id.clone()), None);
 
             if direct {
-                for uuid in self.get_known_clients() {
-                    if self.map.get(&uuid).unwrap().contains(&id) {
-                        let index = self
-                            .map
-                            .get_mut(&uuid)
-                            .unwrap()
-                            .iter()
-                            .position(|r| r == &id)
-                            .unwrap();
+                for (i, uuid) in self.get_known_clients().iter().enumerate() {
+                    // if let Some(i) =
+                    //     Self::route_get_index_of_uuid(self.map.get(&uuid).unwrap(), &uuid)
+                    // {
+                    //     self.map.get_mut(&uuid).unwrap().remove(i);
 
-                        self.map.get_mut(&uuid).unwrap().remove(index);
+                    //     self.broadcast(Packets::Disconnect(uuid.clone()), Some(&uuid));
+                    // }
 
-                        // self.broadcast(Packets::Disconnect(uuid.clone()), Some(&uuid));
+                    if self.map.contains_key(uuid) {
+                        self.map.get_mut(uuid).unwrap().remove(i);
+
+                        self.broadcast(Packets::Disconnect(uuid.clone()), Some(&uuid));
                     }
                 }
             }
 
             self.map.remove(&id);
 
+            // self.broadcast_table(Some(&id));
             self.print_map();
         }
     }
@@ -231,12 +305,46 @@ impl Node {
             }
 
             if self.map.contains_key(&route) {
-                if !self.map.get(&route).unwrap().contains(&src) {
+                // println!("{:?}", route);
+
+                // let update = if let Some(i) =
+                //     Self::route_get_index_of_uuid(self.map.get(&route).unwrap(), &route)
+                // {
+                //     println!(
+                //         "contains, {}, {:?} {:?}",
+                //         i,
+                //         self.map.get(&route.1).unwrap(),
+                //         route
+                //     );
+                //     if self.map.get(&route.1).unwrap()[i].0 != route.0 {
+                //         let _ = self.map.get_mut(&route.1).unwrap().remove(i);
+
+                //         println!("true");
+
+                //         true
+                //     } else {
+                //         println!("false");
+                //         false
+                //     }
+                //     // println!("{:?}", self.map.get(&route.1).unwrap());
+                //     // true
+                // } else {
+                //     true
+                // };
+
+                // if update {
+                //     self.map
+                //         .get_mut(&route.1)
+                //         .unwrap()
+                //         .push((route.0 + 1, src.clone()));
+                //     updated = true;
+                // }
+                if !self.map.get(&route).unwrap().contains(&route) {
                     self.map.get_mut(&route).unwrap().push(src.clone());
                     updated = true;
                 }
             } else {
-                self.map.insert(route.clone(), vec![src.clone()]);
+                self.map.insert(route.clone(), vec![route]);
                 updated = true;
             }
         }
