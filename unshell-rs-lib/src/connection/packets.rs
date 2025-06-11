@@ -4,9 +4,9 @@ use crate::Error;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Packets {
-    UpdateRoutes(String, Vec<String>),
-    Connect(String),
-    Disconnect(String),
+    SyncUUID(String),
+    Update { routes: Vec<String> },
+    Disconnect { routes: Vec<String> },
     Data { source: String, data: String },
 }
 
