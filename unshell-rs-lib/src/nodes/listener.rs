@@ -1,10 +1,10 @@
 use std::net::SocketAddr;
 
-use serde::{Deserialize, Serialize};
+use bincode::{Decode, Encode};
 
 use crate::layers::LayerConfig;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct ConnectionConfig {
     pub socket: SocketAddr,
     pub layers: Vec<LayerConfig>,

@@ -1,7 +1,6 @@
-use serde::Deserialize;
-use serde::Serialize;
+use bincode::{Decode, Encode};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum LayerConfig {
     Base64,
     Handshake,

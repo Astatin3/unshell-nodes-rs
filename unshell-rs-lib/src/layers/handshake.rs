@@ -22,14 +22,14 @@ impl Connection for HandshakeLayer {
         self.inner.is_alive()
     }
 
-    fn read(&mut self) -> Result<String, Error> {
+    fn read(&mut self) -> Result<Vec<u8>, Error> {
         if !self.finished_handshake.load(Ordering::Relaxed) {
             return Err("NotComplete".into());
         }
         self.inner.read()
     }
 
-    fn write(&mut self, data: &str) -> Result<(), Error> {
+    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
         if !self.finished_handshake.load(Ordering::Relaxed) {
             return Err("NotComplete".into());
         }
@@ -54,21 +54,21 @@ impl ProtocolLayer for HandshakeLayer {
 
     fn initialize_client(&mut self) -> Result<(), Error> {
         // Step 1: Client sends SYN
-        self.inner.write("SYN")?;
+        self.inner.write("SYN".as_bytes())?;
 
         // Step 2: Client receives SYN-ACK
         let response = self.inner.read()?;
-        if response != "SYN-ACK" {
-            return Err(format!("Expected SYN-ACK, got: {}", response).into());
+        if response != "SYN-ACK".as_bytes() {
+            return Err(format!("Expected SYN-ACK, got: {:?}", response).into());
         }
 
         // Step 3: Client sends ACK
-        self.inner.write("ACK")?;
+        self.inner.write("ACK".as_bytes())?;
 
         // Step 4: Client receives FIN (final confirmation)
         let response = self.inner.read()?;
-        if response != "FIN" {
-            return Err(format!("Expected FIN, got: {}", response).into());
+        if response != "FIN".as_bytes() {
+            return Err(format!("Expected FIN, got: {:?}", response).into());
         }
 
         info!("Handshake complete!");
@@ -80,20 +80,20 @@ impl ProtocolLayer for HandshakeLayer {
     fn initialize_server(&mut self) -> Result<(), Error> {
         // Step 1: Server receives SYN
         let request = self.inner.read()?;
-        if request != "SYN" {
-            return Err(format!("Expected SYN, got: {}", request).into());
+        if request != "SYN".as_bytes() {
+            return Err(format!("Expected SYN, got: {:?}", request).into());
         }
         // Step 2: Server sends SYN-ACK
-        self.inner.write("SYN-ACK")?;
+        self.inner.write("SYN-ACK".as_bytes())?;
 
         // Step 3: Server receives ACK
         let response = self.inner.read()?;
-        if response != "ACK" {
-            return Err(format!("Expected ACK, got: {}", response).into());
+        if response != "ACK".as_bytes() {
+            return Err(format!("Expected ACK, got: {:?}", response).into());
         }
 
         // Step 4: Server sends FIN (final confirmation)
-        self.inner.write("FIN")?;
+        self.inner.write("FIN".as_bytes())?;
         info!("Handshake complete!");
 
         self.finished_handshake.swap(true, Ordering::Relaxed);

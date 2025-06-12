@@ -1,46 +1,72 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
 
+use bincode::{Decode, Encode};
+use crossbeam_channel::{Receiver, Sender};
+use rand::{seq::IndexedRandom, thread_rng};
+
 use crate::{
     Error,
-    connection::{listener::ConnectionConfig, packets::Packets},
     layers::build_client,
     networkers::{ClientTrait, Connection, ServerTrait, TCPClient, TCPServer, run_listener_state},
+    nodes::{
+        listener::ConnectionConfig,
+        packets::{Packets, decode_vec, encode_vec},
+    },
 };
 
-pub struct Node {
+pub struct NodeState<P>
+where
+    P: Encode + Decode<()> + Debug + Clone + 'static,
+{
     id: String,
     connections: HashMap<String, Box<dyn Connection + Send>>,
     map: HashMap<String, Vec<String>>,
+    packet_listener: Sender<P>,
 }
 
 fn read(c: &mut Box<dyn Connection + Send>) -> Result<Packets, Error> {
-    let a = Packets::decode(c.read()?.as_str());
-    info!("Data: {:?}", a);
-    a
+    Packets::decode(c.read()?.as_slice())
 }
 
 fn write(c: &mut Box<dyn Connection + Send>, packet: Packets) -> Result<(), Error> {
-    info!("Wrote: {:?}", packet);
-    c.write(packet.encode()?.as_str())
+    c.write(&(packet.encode()?))
 }
 
-impl Node {
+pub struct Node<P>
+where
+    P: Encode + Decode<()> + Debug + Clone + 'static,
+{
+    pub state: Arc<Mutex<NodeState<P>>>,
+    pub rx: Receiver<P>,
+}
+
+impl<P> Node<P>
+where
+    P: Encode + Decode<()> + Debug + Clone + Send + 'static,
+{
     pub fn run_node(
         id: String,
         clients: Vec<ConnectionConfig>,
         listeners: Vec<ConnectionConfig>,
-    ) -> Result<(), Error> {
+    ) -> Result<Self, Error>
+    where
+        P: Encode + Decode<()> + Debug + Clone + 'static,
+    {
         // let mut parent = build_client(TCPClient::connect(&parent.socket)?, parent.layers)?;
 
-        let state = Arc::new(Mutex::new(Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+
+        let state = Arc::new(Mutex::new(NodeState::<P> {
             id: id, //Uuid::new_v4().to_string(), //TODO: Calling an OS RNG can pose a problem for security;
             connections: HashMap::new(),
             map: HashMap::new(),
+            packet_listener: tx,
         }));
 
         for listener in listeners {
@@ -57,7 +83,7 @@ impl Node {
             thread::spawn(move || {
                 loop {
                     if let Err(e) = Self::run_client(client.clone(), &state) {
-                        error!("{}", e);
+                        error!("Could not connect to server; {:?}", e);
                     }
 
                     thread::sleep(Duration::from_millis(1000));
@@ -65,12 +91,10 @@ impl Node {
             });
         }
 
-        thread::sleep(Duration::MAX);
-
-        Ok(())
+        Ok(Self { state, rx })
     }
 
-    fn run_client(client: ConnectionConfig, state: &Arc<Mutex<Node>>) -> Result<(), Error> {
+    fn run_client(client: ConnectionConfig, state: &Arc<Mutex<NodeState<P>>>) -> Result<(), Error> {
         Self::run_connection(
             build_client(TCPClient::connect(&client.socket)?, client.layers)?,
             state,
@@ -81,18 +105,18 @@ impl Node {
 
     fn on_listener_client(
         connection: Box<dyn Connection + Send + 'static>,
-        state: Arc<Mutex<Node>>,
+        state: Arc<Mutex<NodeState<P>>>,
     ) {
         thread::spawn(move || {
             if let Err(e) = Self::run_connection(connection, &state) {
-                error!("{}", e);
+                error!("Could not connect; {}", e);
             }
         });
     }
 
     fn run_connection(
         connection: Box<dyn Connection + Send + 'static>,
-        state: &Arc<Mutex<Node>>,
+        state: &Arc<Mutex<NodeState<P>>>,
     ) -> Result<(), Error> {
         let mut connection = connection;
         let s = state.lock().unwrap();
@@ -110,7 +134,7 @@ impl Node {
             return Err("Could not get UUID!".into());
         };
 
-        info!("Connection from {} to {}", this_uuid, other_uuid);
+        info!("New Node! {} (direct)", other_uuid);
 
         // Add connection
         (&mut state.lock().unwrap())
@@ -130,6 +154,11 @@ impl Node {
                             ),
                             Packets::Update { routes } => Ok((&mut state.lock().unwrap())
                                 .extend_routes(other_uuid.clone(), routes)),
+                            Packets::DataUnrouted {
+                                src: source,
+                                dest,
+                                data,
+                            } => (&mut state.lock().unwrap()).route_packet(source, dest, data),
                             _ => {
                                 error!("Unsupported packet: {:?}", packet);
 
@@ -138,7 +167,7 @@ impl Node {
                         };
 
                     if let Err(e) = result {
-                        error!("Got error: {}", e);
+                        error!("Could not parse; {}", e);
                     }
                 }
                 Err(e) => {
@@ -151,19 +180,26 @@ impl Node {
                         break;
                     }
 
-                    error!("Got error: {}", e);
+                    error!("Could not read; {}", e);
                 }
             }
         }
 
         Ok(())
     }
+}
 
-    fn get_known_clients(&self) -> Vec<String> {
+impl<P> NodeState<P>
+where
+    P: Encode + Decode<()> + Debug + Clone + Send + 'static,
+{
+    // Get list of all nodes in map
+    fn get_known_nodes(&self) -> Vec<String> {
         self.map.keys().map(|k| k.clone()).collect::<Vec<String>>()
     }
 
-    fn get_direct_connections(&self) -> Vec<String> {
+    // Get list of node UUIDs that are directly connected to this node
+    fn get_direct_nodes(&self) -> Vec<String> {
         self.connections
             .keys()
             .map(|k| k.clone())
@@ -171,13 +207,15 @@ impl Node {
     }
 
     fn knows_client(&self, id: &String) -> bool {
-        self.get_known_clients().contains(id)
+        self.get_known_nodes().contains(id)
     }
 
+    // Remove all nodes where the routes are empty
     fn remove_null_nodes(&mut self) {
         self.map.retain(|_, routes| !routes.is_empty());
     }
 
+    // Send packet to all directly connected nodes, except maybe one
     fn broadcast(&mut self, data: Packets, disclude: Option<&String>) {
         for (uuid, connection) in self.connections.iter_mut() {
             if disclude.is_some() && disclude.unwrap() == uuid {
@@ -189,9 +227,11 @@ impl Node {
         }
     }
 
+    // Get list of nodes to send to another as known routes
     fn get_routes_to(&self, recv_uuid: &String) -> Vec<String> {
         let mut tx_routes: Vec<String> = Vec::new();
 
+        // Append
         for (map_uuid, routes) in self.map.iter() {
             // Do not transmit a route, which bounces directly back to the sender
             if routes.len() == 1 && &routes[0] == recv_uuid {
@@ -201,7 +241,8 @@ impl Node {
             tx_routes.push(map_uuid.clone());
         }
 
-        tx_routes.append(&mut self.get_direct_connections());
+        // Append directly connected nodes
+        tx_routes.append(&mut self.get_direct_nodes());
 
         tx_routes
     }
@@ -237,7 +278,7 @@ impl Node {
 
         for remove_uuid in routes {
             // Sanity check, in case the current client is still connected
-            if self.get_direct_connections().contains(&remove_uuid) {
+            if self.get_direct_nodes().contains(&remove_uuid) {
                 resend_table = true;
                 continue;
             }
@@ -247,6 +288,12 @@ impl Node {
             if direct || self.knows_client(&remove_uuid) {
                 self.map.remove(&remove_uuid);
                 remove_uuids.push(remove_uuid.clone());
+
+                info!(
+                    "Node disconnected! {} ({})",
+                    remove_uuid,
+                    if direct { "direct" } else { "indirect" }
+                );
 
                 for (uuid, route) in self.map.iter_mut() {
                     if route.contains(&remove_uuid) {
@@ -258,8 +305,6 @@ impl Node {
 
                 self.remove_null_nodes();
             }
-
-            // for uuid in remove_uuids {
         }
 
         if !remove_uuids.is_empty() {
@@ -275,16 +320,14 @@ impl Node {
             self.broadcast_table(None);
         }
 
-        // }
-
-        self.print_map();
+        // self.print_map();
     }
 
     fn extend_routes(&mut self, src: String, routes: Vec<String>) {
         let mut updated = false;
 
         // Quick sanity check
-        if !self.get_direct_connections().contains(&src) {
+        if !self.get_direct_nodes().contains(&src) {
             return;
         }
 
@@ -296,7 +339,7 @@ impl Node {
             }
 
             // If the connection is already established directly, disregard
-            if self.get_direct_connections().contains(&route) {
+            if self.get_direct_nodes().contains(&route) {
                 continue;
             }
 
@@ -306,6 +349,7 @@ impl Node {
                 if !self.map.get(&route).unwrap().contains(&src) {
                     // If the neighbor can be acessed directly, disregard
                     self.map.get_mut(&route).unwrap().push(src.clone());
+                    info!("Node update: {} (indirect)", src);
                     updated = true;
                 } else {
                     // Else, do nothing
@@ -314,12 +358,13 @@ impl Node {
             } else {
                 // Else, create the new route entry
                 self.map.insert(route.clone(), vec![src.clone()]);
+                info!("Node update: {} (indirect)", src);
                 updated = true;
             }
         }
 
         // Solves the case that if a remote node has said that a neighbor has connected before itself has
-        let direct_connections = self.get_direct_connections();
+        let direct_connections = self.get_direct_nodes();
         for connection in direct_connections {
             if self.map.contains_key(&connection) {
                 self.map.remove(&connection);
@@ -331,9 +376,50 @@ impl Node {
         if updated {
             self.broadcast_table(Some(&src));
         }
-        self.print_map();
+        // self.print_map();
     }
 
+    fn route_packet(&mut self, src: String, dest: String, data: Vec<u8>) -> Result<(), Error> {
+        if dest == self.id {
+            self.packet_listener.send(decode_vec::<P>(&data)?)?;
+        } else {
+            if self.connections.contains_key(&dest) {
+                write(
+                    self.connections.get_mut(&dest).unwrap(),
+                    Packets::DataUnrouted { src, dest, data },
+                )?;
+            } else if self.map.contains_key(&dest) {
+                let next_uuid = self
+                    .map
+                    .get(&dest)
+                    .unwrap()
+                    .choose(&mut thread_rng())
+                    .unwrap()
+                    .clone();
+
+                write(
+                    self.connections.get_mut(&next_uuid).unwrap(),
+                    Packets::DataUnrouted { src, dest, data },
+                )?;
+            } else {
+                error!("Could not find route from {} to {}!", src, dest);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn send_unrouted(&mut self, dest: String, data: &P) -> Result<(), Error> {
+        self.route_packet(self.id.clone(), dest, encode_vec(data)?)
+    }
+
+    pub fn get_all_nodes(&self) -> Vec<String> {
+        let mut uuids = self.get_known_nodes();
+        uuids.append(&mut self.get_direct_nodes());
+        uuids
+    }
+
+    #[allow(dead_code)]
     fn print_map(&self) {
         info!("\n\n");
         info!("Local addr: {}", self.id);
@@ -341,6 +427,6 @@ impl Node {
         for (uuid, route) in self.map.iter() {
             info!("{} -> [ {:?} ]", uuid, route);
         }
-        info!("Direct: {:?}", self.get_direct_connections());
+        info!("Direct: {:?}", self.get_direct_nodes());
     }
 }

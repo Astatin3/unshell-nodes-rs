@@ -17,18 +17,15 @@ impl Connection for Base64Layer {
         self.inner.is_alive()
     }
 
-    fn read(&mut self) -> Result<String, Error> {
-        Ok(str::from_utf8(
-            &general_purpose::STANDARD
-                .decode(&self.inner.read()?)
-                .unwrap(),
-        )
-        .unwrap()
-        .to_string())
+    fn read(&mut self) -> Result<Vec<u8>, Error> {
+        Ok(general_purpose::STANDARD
+            .decode(&self.inner.read()?)
+            .unwrap())
     }
 
-    fn write(&mut self, data: &str) -> Result<(), Error> {
-        self.inner.write(&general_purpose::STANDARD.encode(data))
+    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        self.inner
+            .write(general_purpose::STANDARD.encode(data).as_bytes())
     }
 
     fn try_clone(&self) -> Result<Box<dyn Connection + Send + Sync>, Error> {

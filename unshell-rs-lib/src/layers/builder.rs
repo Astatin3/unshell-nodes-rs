@@ -13,11 +13,11 @@ impl Connection for Box<dyn Connection + Send + Sync> {
         (**self).is_alive()
     }
 
-    fn read(&mut self) -> Result<String, Error> {
+    fn read(&mut self) -> Result<Vec<u8>, Error> {
         (**self).read()
     }
 
-    fn write(&mut self, data: &str) -> Result<(), Error> {
+    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
         (**self).write(data)
     }
 

@@ -1,21 +1,29 @@
+use std::{io::Write, net::SocketAddr};
+
 use unshell_rs_lib::{
     Error,
-    connection::{ConnectionConfig, Node},
+    nodes::{ConnectionConfig, Node},
 };
+
+use crate::C2Packet;
+
 pub struct Cli;
 
 impl Cli {
-    pub fn connect(
-        id: String,
-        clients: Vec<ConnectionConfig>,
-        listeners: Vec<ConnectionConfig>,
-    ) -> Result<(), Error> {
+    pub fn connect(socket: SocketAddr) -> Result<(), Error> {
         // let mut client = build_client(TCPClient::connect(&addr)?, vec![])?;
 
-        // let stdin = std::io::stdin();
-        // let mut stdout = std::io::stdout();
+        let stdin = std::io::stdin();
+        let mut stdout = std::io::stdout();
 
-        Node::run_node(id, clients, listeners)
+        let node = Node::<C2Packet>::run_node(
+            "Client".to_string(),
+            vec![ConnectionConfig {
+                socket,
+                layers: vec![],
+            }],
+            vec![],
+        )?;
 
         // let mut client_clone = client.try_clone()?;
         // thread::spawn(move || {
@@ -48,24 +56,46 @@ impl Cli {
         //     }
         // });
 
-        // loop {
-        //     print!("> ");
-        //     stdout.flush()?;
+        let selected_node: Option<usize> = None;
 
-        //     let mut input = String::new();
-        //     stdin.read_line(&mut input)?;
-        //     let input = input.trim();
+        loop {
+            print!("> ");
+            stdout.flush()?;
 
-        //     match input.split(" ").nth(0).unwrap() {
-        //         "ping" => {
-        //             // client.write(Packets::GetConnections.encode()?.as_str())?;
-        //         }
-        //         _ => {
-        //             warn!("Invalid command!")
-        //         }
-        //     }
+            let mut input = String::new();
+            stdin.read_line(&mut input)?;
+            let input = input.trim();
 
-        //     // client.write(input)?;
-        // }
+            let mut node_state = node.state.lock().unwrap();
+
+            let mut split = input.split(" ");
+
+            match split.next().unwrap() {
+                "nodes" => {
+                    for (i, node) in node_state.get_all_nodes().iter().enumerate() {
+                        println!("{} -> {}", i, node);
+                    }
+                }
+                "ping" => {
+                    // if split.count().clone() <= 1 {
+                    //     warn!("You must specify an option");
+                    //     continue;
+                    // }
+
+                    if let Ok(i) = str::parse::<usize>(split.next().unwrap()) {
+                        let nodes = node_state.get_all_nodes();
+                        let node = nodes.get(i).unwrap().clone();
+                        node_state.send_unrouted(node, &C2Packet::Aa).unwrap();
+                    } else {
+                        println!("");
+                    }
+                }
+                _ => {
+                    warn!("Invalid command!")
+                }
+            }
+
+            // client.write(input)?;
+        }
     }
 }

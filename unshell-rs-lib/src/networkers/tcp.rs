@@ -1,5 +1,5 @@
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::{BufReader, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{
         Arc,
@@ -34,23 +34,42 @@ impl Connection for TCPConnection {
         self.is_alive.load(Ordering::Relaxed)
     }
 
-    fn read(&mut self) -> Result<String, Error> {
-        let mut line = String::new();
-        let n = self.reader.read_line(&mut line)?;
+    fn read(&mut self) -> Result<Vec<u8>, Error> {
+        let mut len_bytes = [0u8; 4];
 
-        // Stream sends a null buffer if it is disconnected
-        if n == 0 {
+        if let Err(e) = self.reader.read_exact(&mut len_bytes) {
             self.is_alive.swap(false, Ordering::Relaxed);
+            return Err(format!("Stream disconnected! ({})", e).into());
         }
 
-        // println!("Recieved: {}", line.trim_end().to_string());
+        let len = u32::from_be_bytes(len_bytes) as usize;
 
-        Ok(line.trim_end().to_string())
+        let mut buffer = vec![0u8; len];
+
+        // In case the
+        match self.reader.read_exact(&mut buffer) {
+            Ok(()) => Ok(buffer.to_vec()),
+            Err(e) => {
+                self.is_alive.swap(false, Ordering::Relaxed);
+                Err(format!("Stream disconnected! ({})", e).into())
+            }
+        }
+
+        // let mut buf = Vec::new();
+        // let n = self.reader.read(&mut buf)?;
+
+        // Stream sends a null buffer if it is disconnected
+        // if n == 0 {
+        //     self.is_alive.swap(false, Ordering::Relaxed);
+        // }
+
+        // println!("Recieved: {}", line.trim_end().to_string());
     }
 
-    fn write(&mut self, data: &str) -> Result<(), Error> {
-        // println!("Recsent: {}", data);
-        writeln!(self.stream, "{}", data)?;
+    fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        let len = data.len() as u32;
+        self.stream.write_all(&len.to_be_bytes())?;
+        self.stream.write_all(data)?;
         self.stream.flush()?;
         Ok(())
     }

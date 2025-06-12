@@ -7,8 +7,8 @@ pub trait Connection: Send + Sync {
     fn get_info(&self) -> String;
     fn is_alive(&self) -> bool;
 
-    fn read(&mut self) -> Result<String, Error>;
-    fn write(&mut self, data: &str) -> Result<(), Error>;
+    fn read(&mut self) -> Result<Vec<u8>, Error>;
+    fn write(&mut self, data: &[u8]) -> Result<(), Error>;
 
     fn try_clone(&self) -> Result<Box<dyn Connection + Send + Sync>, Error>;
 }
@@ -25,17 +25,6 @@ pub trait ProtocolLayer: Connection {
         Ok(())
     }
 }
-
-// impl Sized for dyn Connection {}
-
-// pub trait AsyncConnection<C>
-// where
-//     C: Connection,
-// {
-//     fn as_async<T: Serialize + DeserializeOwned + Send + 'static>(
-//         connection: C,
-//     ) -> (Sender<T>, Receiver<T>);
-// }
 
 pub trait ServerTrait<C: Connection> {
     fn get_info(&self) -> String;
