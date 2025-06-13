@@ -8,3 +8,6 @@ static BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standar
 pub mod layers;
 pub mod networkers;
 pub mod nodes;
+mod packets;
+
+pub use packets::C2Packet;

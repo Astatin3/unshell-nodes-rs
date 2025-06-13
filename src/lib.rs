@@ -3,12 +3,10 @@ extern crate log;
 
 mod client;
 mod endpoint;
-mod packets;
 
-pub use client::Cli;
+pub use client::connect_cli;
 
 pub use endpoint::run_endpoint;
-pub use packets::C2Packet;
 
 // pub use client::UnshellClient;
 // pub use client::UnshellGui;

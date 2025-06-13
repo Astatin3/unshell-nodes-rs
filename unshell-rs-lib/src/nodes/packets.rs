@@ -13,15 +13,24 @@ pub enum Packets {
     Disconnect {
         routes: Vec<String>,
     },
+
+    // Send single data packet without routing details
     DataUnrouted {
         src: String,
         dest: String,
         data: Vec<u8>,
     },
+    // Send single data packet with routing details
     DataRouted {
         path: Vec<String>,
         data: Vec<u8>,
     },
+
+    // DataStreamRouted {
+    //     path: Vec<String>,
+    //     data: Vec<u8>,
+    // },
+    ErrorNameExists,
 }
 
 impl Packets {

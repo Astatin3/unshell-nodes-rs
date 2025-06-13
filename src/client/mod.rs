@@ -1,4 +1,4 @@
 mod cli;
-mod client_node;
+mod node_cli;
 
-pub use cli::Cli;
+pub use cli::connect_cli;

@@ -1,13 +1,17 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver, Sender},
+    },
     thread,
     time::Duration,
 };
 
 use bincode::{Decode, Encode};
-use crossbeam_channel::{Receiver, Sender};
+// use std:::{Receiver, Sender};
+#[allow(deprecated)]
 use rand::{seq::IndexedRandom, thread_rng};
 
 use crate::{
@@ -19,16 +23,6 @@ use crate::{
         packets::{Packets, decode_vec, encode_vec},
     },
 };
-
-pub struct NodeState<P>
-where
-    P: Encode + Decode<()> + Debug + Clone + 'static,
-{
-    id: String,
-    connections: HashMap<String, Box<dyn Connection + Send>>,
-    map: HashMap<String, Vec<String>>,
-    packet_listener: Sender<P>,
-}
 
 fn read(c: &mut Box<dyn Connection + Send>) -> Result<Packets, Error> {
     Packets::decode(c.read()?.as_slice())
@@ -43,7 +37,7 @@ where
     P: Encode + Decode<()> + Debug + Clone + 'static,
 {
     pub state: Arc<Mutex<NodeState<P>>>,
-    pub rx: Receiver<P>,
+    pub rx: Receiver<(String, P)>,
 }
 
 impl<P> Node<P>
@@ -60,7 +54,7 @@ where
     {
         // let mut parent = build_client(TCPClient::connect(&parent.socket)?, parent.layers)?;
 
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = mpsc::channel();
 
         let state = Arc::new(Mutex::new(NodeState::<P> {
             id: id, //Uuid::new_v4().to_string(), //TODO: Calling an OS RNG can pose a problem for security;
@@ -128,11 +122,21 @@ where
         write(&mut connection, Packets::SyncUUID(this_uuid.clone()))?;
 
         // Recieve UUID
-        let other_uuid = if let Packets::SyncUUID(source) = read(&mut connection)? {
+        let uuid_result = read(&mut connection)?;
+        let other_uuid = if let Packets::SyncUUID(source) = uuid_result {
             source
         } else {
-            return Err("Could not get UUID!".into());
+            return Err(format!("Could not get UUID! Got {:?}", uuid_result).into());
         };
+
+        if (&mut state.lock().unwrap()).knows_client(&other_uuid) {
+            write(&mut connection, Packets::ErrorNameExists)?;
+            return Err(format!(
+                "Attempted to accept connection from node {} which already exists!",
+                other_uuid
+            )
+            .into());
+        }
 
         info!("New Node! {} (direct)", other_uuid);
 
@@ -189,6 +193,16 @@ where
     }
 }
 
+pub struct NodeState<P>
+where
+    P: Encode + Decode<()> + Debug + Clone + 'static,
+{
+    id: String,
+    connections: HashMap<String, Box<dyn Connection + Send>>,
+    map: HashMap<String, Vec<String>>,
+    packet_listener: Sender<(String, P)>,
+}
+
 impl<P> NodeState<P>
 where
     P: Encode + Decode<()> + Debug + Clone + Send + 'static,
@@ -207,7 +221,7 @@ where
     }
 
     fn knows_client(&self, id: &String) -> bool {
-        self.get_known_nodes().contains(id)
+        self.get_all_nodes().contains(id)
     }
 
     // Remove all nodes where the routes are empty
@@ -381,7 +395,7 @@ where
 
     fn route_packet(&mut self, src: String, dest: String, data: Vec<u8>) -> Result<(), Error> {
         if dest == self.id {
-            self.packet_listener.send(decode_vec::<P>(&data)?)?;
+            self.packet_listener.send((src, decode_vec::<P>(&data)?))?;
         } else {
             if self.connections.contains_key(&dest) {
                 write(
@@ -389,6 +403,7 @@ where
                     Packets::DataUnrouted { src, dest, data },
                 )?;
             } else if self.map.contains_key(&dest) {
+                #[allow(deprecated)]
                 let next_uuid = self
                     .map
                     .get(&dest)

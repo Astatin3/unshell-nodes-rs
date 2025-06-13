@@ -1,14 +1,12 @@
 use std::net::SocketAddr;
 
 use unshell_rs_lib::{
-    Error,
-    nodes::{ConnectionConfig, Node},
+    C2Packet, Error,
+    nodes::{ConnectionConfig, NodeContainer},
 };
 
-use crate::C2Packet;
-
 pub fn run_endpoint(socket: SocketAddr) -> Result<(), Error> {
-    let node = Node::<C2Packet>::run_node(
+    let node = NodeContainer::connect(
         "Server".to_string(),
         vec![],
         vec![ConnectionConfig {
@@ -18,16 +16,17 @@ pub fn run_endpoint(socket: SocketAddr) -> Result<(), Error> {
     )?;
 
     loop {
-        match node.rx.recv()? {
-            C2Packet::Aa => {
-                info!("1");
+        let (src, packet) = node.read_packet()?;
+        match packet {
+            C2Packet::Ping => {
+                info!("Ping from {}!", src);
+                node.send_unrouted(&src, &C2Packet::Pong)?;
+                // (&mut node.state.lock().unwrap()).send_unrouted(src, &C2Packet::Pong)?;
             }
-            C2Packet::Bb => {
-                info!("2");
+            C2Packet::Pong => {
+                info!("Pong!");
             }
-            C2Packet::Cc => {
-                info!("3");
-            }
+            _ => {}
         }
     }
 }

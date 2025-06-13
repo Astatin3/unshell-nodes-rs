@@ -7,11 +7,11 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use log::error;
-use unshell_rs::{Cli, run_endpoint};
-use unshell_rs_lib::nodes::ConnectionConfig;
+use unshell_rs::{connect_cli, run_endpoint};
 
 pub static DEFAULT_CONFIG_FILEPATH: &'static str = "server_config.json";
 
+pub static DEFAULT_RELAY_HOST: &'static str = "0.0.0.0";
 // The default port that this program looks for
 pub static DEFAULT_SERVICE_PORT: u16 = 13370;
 // The default website port that this program looks for
@@ -33,7 +33,7 @@ enum Commands {
     // Run as a service, and potentially hosting a website
     Relay {
         /// IPv4 to listen for clients on.
-        #[arg(short, long, default_value_t = ("0.0.0.0".to_string()))]
+        #[arg(short, long, default_value_t = DEFAULT_RELAY_HOST.to_string())]
         host: String,
 
         /// Port listen to for command clients
@@ -143,7 +143,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // ),
         Commands::Connect { host, port } => {
             let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
-            Cli::connect(if let Ok(addr) = addr {
+            connect_cli(if let Ok(addr) = addr {
                 addr
             } else {
                 error!("Could not parse address!");
@@ -153,7 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Commands::Relay {
             host,
             port,
-            config_filepath,
+            config_filepath: _,
         } => {
             let addr = SocketAddr::from_str(format!("{}:{}", host, port).as_str());
             run_endpoint(if let Ok(addr) = addr {
