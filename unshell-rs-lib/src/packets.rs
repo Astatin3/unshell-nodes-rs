@@ -7,17 +7,16 @@ pub enum TransportLayerPacket {
         stream_id: usize,
     },
     AckStreamUnrouted {
-        local_stream_id: usize,
-        remote_stream_id: usize,
+        ack_stream_id: usize,
+        stream_id: usize,
     },
     StreamDataUnrouted {
         stream_id: usize,
         data: Vec<u8>,
     },
-
-    SpontaniousDataUnrouted {
-        data: Vec<u8>,
-    },
+    // SpontaniousDataUnrouted {
+    //     data: Vec<u8>,
+    // },
 }
 
 #[derive(Debug, Encode, Decode, Clone)]

@@ -1,15 +1,13 @@
 use std::{
     collections::HashMap,
     fmt::Debug,
-    sync::{
-        Arc, Mutex,
-        mpsc::{self, Receiver, Sender},
-    },
+    sync::{Arc, Mutex, MutexGuard},
     thread,
     time::Duration,
 };
 
 use bincode::{Decode, Encode};
+use crossbeam_channel::{Receiver, RecvError, Sender};
 // use std:::{Receiver, Sender};
 #[allow(deprecated)]
 use rand::{seq::IndexedRandom, thread_rng};
@@ -37,7 +35,8 @@ where
     P: Encode + Decode<()> + Debug + Clone + 'static,
 {
     pub state: Arc<Mutex<NodeState<P>>>,
-    pub rx: Receiver<(String, P)>,
+    rx: Receiver<(String, P)>,
+    disconnect_rx: Receiver<String>,
 }
 
 impl<P> Node<P>
@@ -54,13 +53,15 @@ where
     {
         // let mut parent = build_client(TCPClient::connect(&parent.socket)?, parent.layers)?;
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let (disconnect_tx, disconnect_rx) = crossbeam_channel::unbounded();
 
         let state = Arc::new(Mutex::new(NodeState::<P> {
             id: id, //Uuid::new_v4().to_string(), //TODO: Calling an OS RNG can pose a problem for security;
             connections: HashMap::new(),
             map: HashMap::new(),
             packet_listener: tx,
+            disconnect_listener: disconnect_tx,
         }));
 
         for listener in listeners {
@@ -85,7 +86,11 @@ where
             });
         }
 
-        Ok(Self { state, rx })
+        Ok(Self {
+            state,
+            rx,
+            disconnect_rx,
+        })
     }
 
     fn run_client(client: ConnectionConfig, state: &Arc<Mutex<NodeState<P>>>) -> Result<(), Error> {
@@ -191,6 +196,30 @@ where
 
         Ok(())
     }
+
+    pub fn recv(&self) -> Result<(String, P), RecvError> {
+        self.rx.recv()
+    }
+
+    pub fn state(&self) -> MutexGuard<'_, NodeState<P>> {
+        self.state.lock().unwrap()
+    }
+
+    pub fn try_clone(&self) -> Result<Self, Error> {
+        Ok(Self {
+            state: Arc::clone(&self.state),
+            rx: self.rx.clone(),
+            disconnect_rx: self.disconnect_rx.clone(),
+        })
+    }
+
+    pub fn send_unrouted(&self, dest: String, data: &P) -> Result<(), Error> {
+        self.state().send_unrouted(dest, data)
+    }
+
+    pub fn get_disconnect_rx(&self) -> Receiver<String> {
+        self.disconnect_rx.clone()
+    }
 }
 
 pub struct NodeState<P>
@@ -201,6 +230,7 @@ where
     connections: HashMap<String, Box<dyn Connection + Send>>,
     map: HashMap<String, Vec<String>>,
     packet_listener: Sender<(String, P)>,
+    disconnect_listener: Sender<String>,
 }
 
 impl<P> NodeState<P>
@@ -309,6 +339,8 @@ where
                     if direct { "direct" } else { "indirect" }
                 );
 
+                self.disconnect_listener.send(remove_uuid.clone()).unwrap();
+
                 for (uuid, route) in self.map.iter_mut() {
                     if route.contains(&remove_uuid) {
                         let index = route.iter().position(|r| r == &remove_uuid).unwrap();
@@ -396,12 +428,16 @@ where
     fn route_packet(&mut self, src: String, dest: String, data: Vec<u8>) -> Result<(), Error> {
         if dest == self.id {
             self.packet_listener.send((src, decode_vec::<P>(&data)?))?;
+
+            Ok(())
         } else {
             if self.connections.contains_key(&dest) {
                 write(
                     self.connections.get_mut(&dest).unwrap(),
                     Packets::DataUnrouted { src, dest, data },
                 )?;
+
+                Ok(())
             } else if self.map.contains_key(&dest) {
                 #[allow(deprecated)]
                 let next_uuid = self
@@ -416,12 +452,12 @@ where
                     self.connections.get_mut(&next_uuid).unwrap(),
                     Packets::DataUnrouted { src, dest, data },
                 )?;
+
+                Ok(())
             } else {
-                error!("Could not find route from {} to {}!", src, dest);
+                Err::<(), Error>(format!("Could not find route from {} to {}!", src, dest).into())
             }
         }
-
-        Ok(())
     }
 
     pub fn send_unrouted(&mut self, dest: String, data: &P) -> Result<(), Error> {

@@ -7,21 +7,19 @@ use std::{
 use crossbeam_channel::{Receiver, Sender};
 
 use crate::{
-    C2Packet, Error,
-    nodes::{
-        ConnectionConfig, Node, Stream,
-        node::NodeState,
-        packets::{decode_vec, encode_vec},
-    },
+    Error,
+    nodes::{ConnectionConfig, Node, Stream, stream::StreamHandle},
     packets::TransportLayerPacket,
 };
 
-type Streams = Arc<Mutex<HashMap<(usize, String), Option<(Stream, Sender<Vec<u8>>)>>>>;
+type Streams = Arc<Mutex<HashMap<(usize, String), StreamHandle>>>;
 
 pub struct NodeContainer {
     streams: Streams,
-    state: Arc<Mutex<NodeState<TransportLayerPacket>>>,
-    spontanious_rx: Receiver<(String, C2Packet)>,
+    node: Node<TransportLayerPacket>,
+    on_stream_rx: Receiver<Stream>,
+    // state: Arc<Mutex<NodeState<TransportLayerPacket>>>,
+    // spontanious_rx: Receiver<(String, C2Packet)>,
 }
 
 impl NodeContainer {
@@ -30,20 +28,38 @@ impl NodeContainer {
         clients: Vec<ConnectionConfig>,
         listeners: Vec<ConnectionConfig>,
     ) -> Result<Self, Error> {
-        let node = Node::run_node(id, clients, listeners)?;
+        let node = Node::<TransportLayerPacket>::run_node(id, clients, listeners)?;
         let streams = Arc::new(Mutex::new(HashMap::new()));
-        let (spontanious_tx, spontanious_rx) = crossbeam_channel::unbounded();
+        // let (spontanious_tx, spontanious_rx) = crossbeam_channel::unbounded();
+        let (on_stream_tx, on_stream_rx) = crossbeam_channel::unbounded();
 
         let s = Self {
             streams: Arc::clone(&streams),
-            state: Arc::clone(&node.state),
-            spontanious_rx,
+            node: node.try_clone()?,
+            on_stream_rx,
         };
+
+        let close_rx = node.get_disconnect_rx();
+        let stream_clone = Arc::clone(&streams);
+        thread::spawn(move || {
+            loop {
+                let close_uuid = close_rx.recv().unwrap();
+                let stream = stream_clone.lock().unwrap();
+                let keys = stream.keys();
+                for key in keys {
+                    if key.1 == close_uuid {
+                        warn!("Stream ({}, {}) disconnected!", key.0, key.1);
+                        let handle = (&mut stream_clone.lock().unwrap()).remove(key).unwrap();
+                        handle.close();
+                    }
+                }
+            }
+        });
 
         // Start node listening thread
         thread::spawn(move || {
             loop {
-                if let Err(e) = Self::node_listening_thread(&node, &streams, &spontanious_tx) {
+                if let Err(e) = Self::node_listening_thread(&node, &streams, &on_stream_tx) {
                     error!("Got error: {}", e);
                 }
             }
@@ -55,97 +71,113 @@ impl NodeContainer {
     fn node_listening_thread(
         node: &Node<TransportLayerPacket>,
         streams: &Streams,
-        spontanious_tx: &Sender<(String, C2Packet)>,
+        on_stream_tx: &Sender<Stream>, // spontanious_tx: &Sender<(String, C2Packet)>,
     ) -> Result<(), Error> {
-        let (src, packet) = node.rx.recv()?;
+        // info!("Loop");
+        let (src, packet) = node.recv()?;
+        info!("Packet: {:?}", packet);
 
         match packet {
-            TransportLayerPacket::RequestStreamUnrouted { stream_id } => {
+            TransportLayerPacket::RequestStreamUnrouted {
+                stream_id: remote_stream_id,
+            } => {
+                // Create stream ID
                 let local_stream_id = streams.lock().unwrap().keys().len();
-                streams
-                    .lock()
-                    .unwrap()
-                    .insert((local_stream_id, src.clone()), None);
-                (&mut node.state.lock().unwrap()).send_unrouted(
-                    src,
-                    &TransportLayerPacket::AckStreamUnrouted {
-                        local_stream_id,
-                        remote_stream_id: stream_id,
-                    },
-                )?;
+                // Send response to server including local id and remoe ID
+                Stream::respond_create(src.clone(), local_stream_id, remote_stream_id, node)?;
 
+                Self::create_handle_thread(
+                    on_stream_tx,
+                    streams,
+                    node,
+                    src,
+                    local_stream_id,
+                    remote_stream_id,
+                )?;
                 Ok(())
             }
             TransportLayerPacket::AckStreamUnrouted {
-                local_stream_id,
-                remote_stream_id,
+                ack_stream_id,
+                stream_id,
             } => {
-                let key = &(remote_stream_id, src);
-                if let Some(stream_mut) = streams.lock().unwrap().get_mut(&key) {
-                    if stream_mut.is_none() {
-                        let stream = Self::create_stream(local_stream_id, node, src, stream_mut)?;
-                        Ok(())
-                    } else {
-                        Err(format!("Stream {:?} already exists!", key).into())
-                    }
-                } else {
-                    Err(format!("Could not find stream id by {:?}", key).into())
-                }
-            }
-            TransportLayerPacket::StreamDataUnrouted { stream_id, data } => todo!(),
-            TransportLayerPacket::SpontaniousDataUnrouted { data } => {
-                spontanious_tx.send((src, decode_vec::<C2Packet>(&data)?))?;
+                Self::create_handle_thread(
+                    on_stream_tx,
+                    streams,
+                    node,
+                    src,
+                    ack_stream_id,
+                    stream_id,
+                )?;
                 Ok(())
             }
+            TransportLayerPacket::StreamDataUnrouted { stream_id, data } => {
+                match streams.lock().unwrap().get(&(stream_id, src.clone())) {
+                    Some(handle) => Ok(handle.send(data).unwrap()),
+                    // Some(_) => Err(format!(
+                    //     "Stream {}, {} has not been initilized!",
+                    //     stream_id, src
+                    // )
+                    // .into()),
+                    None => Err(format!("Stream {}, {} does not exist!", stream_id, src).into()),
+                }
+            } // _ => Err(format!("Unsupported packet: {:?}", packet).into()),
         }
     }
 
-    fn create_stream(
-        remote_stream_id: usize,
-        dest: String,
+    fn create_handle_thread(
+        on_stream_tx: &Sender<Stream>,
+        streams: &Streams,
         node: &Node<TransportLayerPacket>,
-        stream_mut: &mut Option<(Stream, Sender<Vec<u8>>)>,
+        src: String,
+        local_stream_id: usize,
+        remote_stream_id: usize,
     ) -> Result<(), Error> {
-        let (recv_tx, recv_rx) = crossbeam_channel::unbounded();
-        let (send_tx, send_rx) = crossbeam_channel::unbounded();
+        info!("Local: {}, Remote: {}", local_stream_id, remote_stream_id);
 
-        let stream = Stream::new(send_tx, recv_rx);
+        // Create stream from local and remote stream handles
+        let (stream, handle) =
+            Stream::create_handle(src.clone(), local_stream_id, remote_stream_id)?;
 
-        let _ = stream_mut.insert((stream, recv_tx));
+        on_stream_tx.send(stream)?;
 
+        // Add the local stream to map
+        streams
+            .lock()
+            .unwrap()
+            .insert((local_stream_id, src.clone()), handle.clone()?);
+
+        let node_clone = node.try_clone()?;
         thread::spawn(move || {
             loop {
-                let packet = send_rx.recv().unwrap();
-                (&mut node.state.lock().unwrap())
-                    .send_unrouted(
-                        dest,
-                        &TransportLayerPacket::StreamDataUnrouted {
-                            stream_id: remote_stream_id,
-                            data: packet,
-                        },
-                    )
-                    .unwrap();
+                let data = handle.recv().unwrap();
+                if let Err(e) = node_clone.state().send_unrouted(
+                    src.clone(),
+                    &TransportLayerPacket::StreamDataUnrouted {
+                        stream_id: remote_stream_id,
+                        data,
+                    },
+                ) {
+                    error!("Got error: {}", e);
+                    break;
+                }
             }
         });
 
         Ok(())
     }
 
+    pub fn create_stream_block(&self, dest: String) -> Result<Stream, Error> {
+        let local_stream_id = self.streams.lock().unwrap().keys().len();
+        Stream::ask_create(dest.clone(), local_stream_id, &self.node)?;
+        Ok(self.on_stream_rx.recv()?)
+    }
+
+    pub fn recv_stream(&self) -> Result<Stream, Error> {
+        Ok(self.on_stream_rx.recv()?)
+    }
+
     pub fn get_nodes(&self) -> Vec<String> {
-        self.state.lock().unwrap().get_all_nodes()
-    }
-
-    pub fn send_unrouted(&self, dest: &String, data: &C2Packet) -> Result<(), Error> {
-        (&mut self.state.lock().unwrap()).send_unrouted(
-            dest.clone(),
-            &TransportLayerPacket::SpontaniousDataUnrouted {
-                data: encode_vec(data)?,
-            },
-        )?;
-        Ok(())
-    }
-
-    pub fn read_packet(&self) -> Result<(String, C2Packet), Error> {
-        Ok(self.spontanious_rx.recv()?)
+        self.node.state().get_all_nodes()
+        // self.state.lock().unwrap().get_all_nodes()
     }
 }
